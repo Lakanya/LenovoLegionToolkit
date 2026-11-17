@@ -201,8 +201,20 @@ public class SensorsController(GPUController gpuController) : AbstractSensorsCon
     protected override Task<int> GetGpuCurrentFanSpeedAsync() =>
         GetFanSpeedAsync(GetProfile().FanSpeedSource, CapabilityID.GpuCurrentFanSpeed, GetProfile().Gpu.FanId);
 
-    protected override Task<int> GetSystemFanSpeedAsync(SystemFanDefinition definition) =>
-        GetFanSpeedAsync(GetProfile().FanSpeedSource, definition.SpeedCapability, definition.FanId);
+    protected override async Task<int> GetSystemFanSpeedAsync(SystemFanDefinition definition)
+    {
+        var fanSpeedSource = GetProfile().FanSpeedSource;
+
+        if (fanSpeedSource == ValueSource.Capability)
+        {
+            var features = (await Compatibility.GetMachineInformationAsync().ConfigureAwait(false)).Features;
+
+            if (features.Source == MachineInformation.FeatureData.SourceType.CapabilityData && !features[definition.SpeedCapability])
+                return -1;
+        }
+
+        return await GetFanSpeedAsync(fanSpeedSource, definition.SpeedCapability, definition.FanId).ConfigureAwait(false);
+    }
 
     protected override Task<int> GetSystemFanMaxSpeedAsync(SystemFanDefinition definition) =>
         GetMaxFanSpeedAsync(GetProfile(), new FanTableEndpoint(definition.SensorId, definition.FanId));
