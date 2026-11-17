@@ -279,31 +279,20 @@ public partial class FanCurveControlV2
             _grid.RowDefinitions.Clear();
 
             var rows = tableData
-                .GroupBy(td => td.Type)
-                .Select(g => g.First())
-                .OrderBy(td => GetFanOrder(td.FanId))
+                .OrderBy(td => td.FanId)
+                .ThenBy(td => td.SensorId)
                 .ToArray();
+
+            var duplicateTypes = rows
+                .GroupBy(td => td.Type)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToHashSet();
 
             foreach (var td in rows)
             {
-                AddRow(GetLabel(td), GetTemps(tableData, td), td.FanSpeeds);
+                AddRow(GetLabel(td, duplicateTypes.Contains(td.Type)), td.Temps, td.FanSpeeds);
             }
-        }
-
-        private static ushort[] GetTemps(FanTableData[] tableData, FanTableData fan)
-        {
-            var sensorId = fan.Type switch
-            {
-                FanTableType.CPU => 4,
-                FanTableType.CPUSensor => 1,
-                FanTableType.SystemFan => 1,
-                _ => 5,
-            };
-
-            return tableData
-                .Where(td => td.SensorId == sensorId)
-                .Select(td => td.Temps)
-                .FirstOrDefault() ?? fan.Temps;
         }
 
         private void AddRow(string label, ushort[] temps, ushort[] fanSpeeds)
@@ -338,24 +327,20 @@ public partial class FanCurveControlV2
             _rows.Add((temperatureTextBlock, fanSpeedTextBlock, temps, fanSpeeds));
         }
 
-        private static int GetFanOrder(byte fanId) => fanId switch
+        private static string GetLabel(FanTableData tableData, bool includeSensorId)
         {
-            1 => 0,
-            2 => 1,
-            3 => 2,
-            4 => 3,
-            _ => 4,
-        };
+            var label = tableData.Type switch
+            {
+                FanTableType.CPU => Resource.FanCurveControl_CPU,
+                FanTableType.CPUSensor => Resource.FanCurveControl_CPUSensor,
+                FanTableType.GPU => Resource.FanCurveControl_GPU,
+                FanTableType.GPU2 => Resource.FanCurveControl_GPU2,
+                FanTableType.SystemFan => Resource.SensorsControl_Fan_Title,
+                _ => "-",
+            };
 
-        private static string GetLabel(FanTableData tableData) => tableData.Type switch
-        {
-            FanTableType.CPU => Resource.FanCurveControl_CPU,
-            FanTableType.CPUSensor => Resource.FanCurveControl_CPUSensor,
-            FanTableType.GPU => Resource.FanCurveControl_GPU,
-            FanTableType.GPU2 => Resource.FanCurveControl_GPU2,
-            FanTableType.SystemFan => Resource.SensorsControl_Fan_Title,
-            _ => "-",
-        };
+            return includeSensorId ? $"{label} ({tableData.SensorId})" : label;
+        }
 
         private static string FormatTemperature(ushort[] temps, int index)
         {
