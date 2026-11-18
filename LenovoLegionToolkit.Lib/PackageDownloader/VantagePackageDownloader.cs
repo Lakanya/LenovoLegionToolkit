@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -45,28 +46,30 @@ public class VantagePackageDownloader(HttpClientFactory httpClientFactory)
 
         var count = 0;
         var totalCount = packageDefinitions.Count;
+        if (totalCount == 0)
+            return [];
 
-        var packages = new List<Package>();
-        foreach (var packageDefinition in packageDefinitions)
-        {
-            var package = await GetPackage(httpClient, updateDetector, packageDefinition, token).ConfigureAwait(false);
+        var results = new ConcurrentBag<(int Index, Package Package)>();
+        var indexedDefinitions = packageDefinitions.Select((def, idx) => (Index: idx, Definition: def)).ToArray();
 
-            if (!package.HasValue)
+        await Parallel.ForEachAsync(
+            indexedDefinitions,
+            new ParallelOptions { MaxDegreeOfParallelism = 6, CancellationToken = token },
+            async (item, ct) =>
             {
-                count++;
-                progress?.Report(count * 100 / totalCount);
-                continue;
-            }
+                var package = await GetPackage(httpClient, updateDetector, item.Definition, ct).ConfigureAwait(false);
+                if (package.HasValue)
+                    results.Add((item.Index, package.Value));
 
-            packages.Add(package.Value);
+                var completed = Interlocked.Increment(ref count);
+                // ReSharper disable once PossibleLossOfFraction
+                progress?.Report(completed * 100 / totalCount);
+            }).ConfigureAwait(false);
 
-            count++;
-
-            // ReSharper disable once PossibleLossOfFraction
-            progress?.Report(count * 100 / totalCount);
-        }
-
-        return packages;
+        return results
+            .OrderBy(r => r.Index)
+            .Select(r => r.Package)
+            .ToList();
     }
 
     private static async Task<List<PackageDefinition>> GetPackageDefinitionsAsync(HttpClient httpClient, string location, CancellationToken token)
@@ -137,8 +140,9 @@ public class VantagePackageDownloader(HttpClientFactory httpClientFactory)
         var readmeName = document.SelectSingleNode("/Package/Files/Readme/File/Name")?.InnerText;
         var readme = $"{baseLocation}/{readmeName}";
         var fileLocation = $"{baseLocation}/{fileName}";
-        var rebootString = document.SelectSingleNode("/Package/Reboot/@type")!.InnerText;
+        var rebootString = document.SelectSingleNode("/Package/Reboot/@type")?.InnerText;
         var reboot = int.TryParse(rebootString, out var rebootInt) ? (RebootType)rebootInt : RebootType.NotRequired;
+        var installCmd = document.SelectSingleNode("/Package/Install/Cmdline")?.InnerText;
 
         var isUpdate = false;
         try
@@ -166,7 +170,8 @@ public class VantagePackageDownloader(HttpClientFactory httpClientFactory)
             Readme = readme,
             FileLocation = fileLocation,
             IsUpdate = isUpdate,
-            Reboot = reboot
+            Reboot = reboot,
+            InstallCommand = installCmd
         };
     }
 }

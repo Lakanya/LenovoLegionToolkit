@@ -40,8 +40,18 @@ public partial class DiscreteGPUControl
         if (!_gpuController.IsSupported())
             throw new InvalidOperationException("Unsupported operation");
 
+        if (_gpuController.LastKnownStatus is { } cachedStatus && cachedStatus.State != GPUState.Unknown)
+            ApplyStatus(cachedStatus);
+
         _gpuController.Interval = _settings.Store.GPUMonitoringInterval;
-        await _gpuController.StartAsync();
+        if (_gpuController.IsStarted)
+        {
+            _ = Task.Run(() => _gpuController.RefreshNowAsync());
+        }
+        else
+        {
+            await _gpuController.StartAsync(delay: 0);
+        }
     }
 
     private async void NativeWindowsMessageListener_Changed(object? sender, NativeWindowsMessageListener.ChangedEventArgs e)
@@ -61,8 +71,6 @@ public partial class DiscreteGPUControl
         if (IsVisible)
             return;
 
-        _content.Visibility = Visibility.Hidden;
-
         if (!_settings.Store.GameDetection.UseDiscreteGPU)
             await _gpuController.StopAsync();
     }
@@ -71,6 +79,12 @@ public partial class DiscreteGPUControl
     {
         if (!IsVisible)
             return;
+
+        ApplyStatus(e);
+    });
+
+    private void ApplyStatus(GPUStatus e)
+    {
 
         var tooltipStringBuilder = new StringBuilder(Resource.DiscreteGPUControl_PerformanceState);
         tooltipStringBuilder.AppendLine().Append(" · ").Append(e.PerformanceState ?? Resource.DiscreteGPUControl_PerformanceState_Unknown);
@@ -157,7 +171,7 @@ public partial class DiscreteGPUControl
         }
 
         _content.Visibility = Visibility.Visible;
-    });
+    }
 
     private void DeactivateGPUButton_Click(object sender, RoutedEventArgs e)
     {

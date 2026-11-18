@@ -20,7 +20,8 @@ public class VantageDisabler : AbstractSoftwareDisabler
     protected override IEnumerable<string> ServiceNames =>
     [
         "ImControllerService",
-        "LenovoVantageService"
+        "LenovoVantageService",
+        "UDClientService"
     ];
 
     protected override IEnumerable<string> ProcessNames =>
@@ -30,7 +31,8 @@ public class VantageDisabler : AbstractSoftwareDisabler
         "Lenovo.Vantage",
         "LenovoVantage",
         "QSHelper",
-        "ScheduleEventAction"
+        "ScheduleEventAction",
+        "UDClientService"
     ];
 
     protected override IEnumerable<string> StartupEntryNames => ["LenovoVantageToolbar", "LenovoVantage"];

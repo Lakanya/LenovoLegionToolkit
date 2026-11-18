@@ -159,6 +159,8 @@ public class IoCModule : Module
         builder.Register<PackageDownloaderFactory>();
         builder.Register<PCSupportPackageDownloader>();
         builder.Register<VantagePackageDownloader>();
+        builder.Register<SmartPackageDownloader>();
+        builder.Register<DriverUpdateChecker>().SingleInstance();
 
         builder.Register<HWiNFOIntegration>();
 

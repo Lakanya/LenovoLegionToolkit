@@ -35,6 +35,10 @@ public class GPUController
     private string? _gpuInstanceId;
     private string? _performanceState;
     private string? _sleepBlockerReason;
+    private HybridModeState? _cachedHybridModeState;
+    private long _cachedHybridModeTicks;
+
+    public GPUStatus? LastKnownStatus { get; private set; }
 
     public PerformanceStateId? CurrentPerformanceState { get; private set; }
 
@@ -63,10 +67,15 @@ public class GPUController
             _refreshGate.Release();
         }
 
+        GPUStatus status;
         using (await _stateLock.LockAsync().ConfigureAwait(false))
         {
-            return new GPUStatus(_state, _performanceState, _processes, _sleepBlockerReason);
+            status = new GPUStatus(_state, _performanceState, _processes, _sleepBlockerReason);
+            LastKnownStatus = status;
         }
+
+        Refreshed?.Invoke(this, status);
+        return status;
     }
 
     public Task StartAsync(int delay = -1, int interval = 5_000)
@@ -190,10 +199,14 @@ public class GPUController
                 {
                     await DoRefreshAsync(token).ConfigureAwait(false);
 
+                    GPUStatus status;
                     using (await _stateLock.LockAsync(token).ConfigureAwait(false))
                     {
-                        Refreshed?.Invoke(this, new GPUStatus(_state, _performanceState, _processes, _sleepBlockerReason));
+                        status = new GPUStatus(_state, _performanceState, _processes, _sleepBlockerReason);
+                        LastKnownStatus = status;
                     }
+
+                    Refreshed?.Invoke(this, status);
                 }
                 finally
                 {
@@ -337,9 +350,15 @@ public class GPUController
             return;
         }
 
-        var feature = IoCContainer.Resolve<HybridModeFeature>();
+        var nowTicks = DateTime.UtcNow.Ticks;
+        if (_cachedHybridModeState is null || (nowTicks - _cachedHybridModeTicks) > 30 * TimeSpan.TicksPerSecond)
+        {
+            var feature = IoCContainer.Resolve<HybridModeFeature>();
+            _cachedHybridModeState = await feature.GetStateAsync().ConfigureAwait(false);
+            _cachedHybridModeTicks = nowTicks;
+        }
 
-        if (await feature.GetStateAsync().ConfigureAwait(false) == HybridModeState.Off)
+        if (_cachedHybridModeState == HybridModeState.Off)
         {
             newProcesses = processNames;
             newState = GPUState.MonitorConnected;

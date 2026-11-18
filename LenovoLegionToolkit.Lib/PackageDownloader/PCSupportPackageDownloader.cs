@@ -5,6 +5,8 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using LenovoLegionToolkit.Lib.Extensions;
+using LenovoLegionToolkit.Lib.PackageDownloader.Detectors;
+using LenovoLegionToolkit.Lib.Utils;
 
 namespace LenovoLegionToolkit.Lib.PackageDownloader;
 
@@ -29,6 +31,14 @@ public class PCSupportPackageDownloader(HttpClientFactory httpClientFactory)
 
         progress?.Report(0);
 
+        var currentMachineType = (await Compatibility.GetMachineInformationAsync().ConfigureAwait(false)).MachineType;
+        PCSupportPackageUpdateDetector? detector = null;
+        if (string.Equals(machineType, currentMachineType, StringComparison.OrdinalIgnoreCase))
+        {
+            detector = new PCSupportPackageUpdateDetector();
+            await detector.InitializeAsync().ConfigureAwait(false);
+        }
+
         var catalogJson = await httpClient.GetStringAsync($"{CATALOG_BASE_URL}{machineType}", token).ConfigureAwait(false);
         var catalogJsonNode = JsonNode.Parse(catalogJson);
         var downloadsNode = catalogJsonNode?["body"]?["DownloadItems"]?.AsArray();
@@ -42,17 +52,18 @@ public class PCSupportPackageDownloader(HttpClientFactory httpClientFactory)
             if (!IsCompatible(downloadNode, osString))
                 continue;
 
-            var package = ParsePackage(downloadNode!);
+            var package = ParsePackage(downloadNode!, detector);
             if (package is null)
                 continue;
 
             packages.Add(package.Value);
         }
 
+        progress?.Report(100);
         return packages;
     }
 
-    private static Package? ParsePackage(JsonNode downloadNode)
+    private static Package? ParsePackage(JsonNode downloadNode, PCSupportPackageUpdateDetector? detector)
     {
         var id = downloadNode["ID"]!.ToJsonString();
         var category = downloadNode["Category"]!["Name"]!.ToString();
@@ -80,6 +91,8 @@ public class PCSupportPackageDownloader(HttpClientFactory httpClientFactory)
 
         var readme = readmeFileNode?["URL"]?.ToString();
 
+        var (isUpdate, reboot) = detector?.Detect(category, title, version, releaseDate) ?? (false, RebootType.NotRequired);
+
         return new()
         {
             Id = id,
@@ -93,6 +106,8 @@ public class PCSupportPackageDownloader(HttpClientFactory httpClientFactory)
             ReleaseDate = releaseDate,
             Readme = readme,
             FileLocation = fileLocation,
+            IsUpdate = isUpdate,
+            Reboot = reboot,
         };
     }
 

@@ -113,11 +113,21 @@ public class RefreshRateFeature : IFeature<RefreshRate>
 
         if (target is not null && target.IsBoostRefreshRate)
         {
-            var dynamicStates = (await GetAllStatesAsync().ConfigureAwait(false))
-                .Concat(await GetAllDynamicStatesAsync().ConfigureAwait(false))
-                .Where(r => r.IsDynamic)
+            var currentSettings = display.DisplayScreen.CurrentSetting;
+            var frequencies = display.DisplayScreen.GetPossibleSettings()
+                .Where(dps => Match(dps, currentSettings))
+                .Select(dps => dps.Frequency)
                 .Distinct()
+                .OrderBy(freq => freq)
                 .ToArray();
+
+            var dynamicStates = new List<RefreshRate>();
+            foreach (var frequency in frequencies)
+            {
+                var lowFrequency = target.DisplayTarget.GetDynamicLowFrequency(frequencies.Where(f => f <= frequency));
+                if (lowFrequency > 0 && lowFrequency < frequency)
+                    dynamicStates.Add(new RefreshRate(frequency, isDynamic: true, baseFrequency: lowFrequency));
+            }
 
             var physicalFrequency = target.SignalInfo is null ? 0 : (int)(target.SignalInfo.VerticalSyncFrequencyInMillihertz / 1000);
 

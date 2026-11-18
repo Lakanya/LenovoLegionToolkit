@@ -214,6 +214,16 @@ public partial class App
         {
             RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
         }
+        else if (Environment.ProcessPath is { Length: > 0 } processPath)
+        {
+            try
+            {
+                var gpuController = IoCContainer.Resolve<GPUController>();
+                if (gpuController.GetGpuPreference(processPath) == GpuPreference.Default)
+                    gpuController.SetGpuPreference(processPath, GpuPreference.Integrated);
+            }
+            catch { /* Ignore */ }
+        }
 
         CardControl.IsCompact = settings.Store.CompactMode;
 

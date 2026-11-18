@@ -65,6 +65,7 @@ public abstract class AbstractSensorsController(GPUController gpuController) : I
 
     private int _cachedCpuUtilization;
     private long _lastCpuCalculationTick;
+    private bool _isPrepared;
     private const long MinUpdateIntervalTicks = 500 * 10000; // 500ms (1ms = 10,000 ticks)
 
     protected int? _cpuBaseClockCache;
@@ -81,6 +82,17 @@ public abstract class AbstractSensorsController(GPUController gpuController) : I
 
     public async Task PrepareAsync()
     {
+        if (_isPrepared)
+        {
+            if (GetSystemTimes(out var idleNow, out var kernelNow, out var userNow))
+            {
+                _prevIdleTime = ToUInt64(idleNow);
+                _prevKernelTime = ToUInt64(kernelNow);
+                _prevUserTime = ToUInt64(userNow);
+            }
+            return;
+        }
+
         _percentProcessorPerformanceCounter.Reset();
         _percentProcessorPerformanceCounter.NextValue();
 
@@ -98,6 +110,7 @@ public abstract class AbstractSensorsController(GPUController gpuController) : I
         _percentProcessorPerformanceCounter.NextValue();
 
         GetCpuUtilization(100);
+        _isPrepared = true;
     }
 
 

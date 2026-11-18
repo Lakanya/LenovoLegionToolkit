@@ -89,11 +89,18 @@ public abstract class AbstractComboBoxFeatureCardControl<T> : AbstractRefreshing
 
     protected override async Task OnRefreshAsync()
     {
-        if (!await Feature.IsSupportedAsync())
-            throw new NotSupportedException();
+        var (isSupported, items, selectedItem) = await Task.Run(async () =>
+        {
+            if (!await Feature.IsSupportedAsync().ConfigureAwait(false))
+                return (false, Array.Empty<T>(), default(T));
 
-        var items = await Feature.GetAllStatesAsync();
-        var selectedItem = await Feature.GetStateAsync();
+            var allStates = await Feature.GetAllStatesAsync().ConfigureAwait(false);
+            var currentState = await Feature.GetStateAsync().ConfigureAwait(false);
+            return (true, allStates, currentState);
+        });
+
+        if (!isSupported)
+            throw new NotSupportedException();
 
         _comboBox.SetItems(items, selectedItem, ComboBoxItemDisplayName);
         _comboBox.IsEnabled = items.Length != 0;

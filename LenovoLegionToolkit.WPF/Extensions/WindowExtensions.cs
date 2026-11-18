@@ -124,8 +124,33 @@ public static class WindowExtensions
         PInvoke.SetWindowLong(hwnd, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE, (int)extendedStyle);
     }
 
+    public static unsafe void RestoreNormalPriority()
+    {
+        try
+        {
+            const uint PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION = 0x00000004;
+
+            PInvoke.SetPriorityClass(PInvoke.GetCurrentProcess(), global::Windows.Win32.System.Threading.PROCESS_CREATION_FLAGS.NORMAL_PRIORITY_CLASS);
+
+            var state = new global::Windows.Win32.System.Threading.PROCESS_POWER_THROTTLING_STATE
+            {
+                Version = PInvoke.PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                ControlMask = PInvoke.PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+                StateMask = 0,
+            };
+
+            PInvoke.SetProcessInformation(PInvoke.GetCurrentProcess(),
+                global::Windows.Win32.System.Threading.PROCESS_INFORMATION_CLASS.ProcessPowerThrottling,
+                &state,
+                (uint)sizeof(global::Windows.Win32.System.Threading.PROCESS_POWER_THROTTLING_STATE));
+        }
+        catch { /* Ignore */ }
+    }
+
     public static void BringToForeground(this Window window)
     {
+        RestoreNormalPriority();
+
         window.ShowInTaskbar = true;
 
         if (window.Visibility == Visibility.Hidden)
