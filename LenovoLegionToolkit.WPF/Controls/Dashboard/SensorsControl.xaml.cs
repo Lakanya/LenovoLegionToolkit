@@ -88,7 +88,6 @@ public partial class SensorsControl
         _cts = null;
         if (!Dispatcher.HasShutdownStarted)
             cts?.Cancel();
-        UpdateValues(SensorsData.Empty);
     }
 
     private async Task RefreshAsync(Task? previousTask, CancellationTokenSource cts)

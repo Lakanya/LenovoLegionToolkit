@@ -143,12 +143,25 @@
                                 Focusable="True"
                                 Text="{x:Static resources:Resource.PackagesPage_Source}" />
                             <RadioButton
+                                x:Name="_sourceSmartRadio"
+                                Focusable="True"
+                                GroupName="source"
+                                IsChecked="True">
+                                <StackPanel>
+                                    <TextBlock Text="Smart Merged (Auto)" />
+                                    <TextBlock
+                                        FontSize="12"
+                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                        TextWrapping="WrapWithOverflow"
+                                        Text="Combines PC Support &amp; Vantage with full update detection" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton
                                 x:Name="_sourcePrimaryRadio"
                                 AutomationProperties.HelpText="{x:Static resources:Resource.PackagesPage_PrimarySource_Message}"
                                 AutomationProperties.Name="{x:Static resources:Resource.PackagesPage_PrimarySource}"
                                 Focusable="True"
-                                GroupName="source"
-                                IsChecked="True">
+                                GroupName="source">
                                 <StackPanel>
                                     <TextBlock Text="{x:Static resources:Resource.PackagesPage_PrimarySource}" />
                                     <TextBlock
@@ -222,6 +235,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="250" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
@@ -243,9 +257,19 @@
                                 Content="{x:Static resources:Resource.PackagesPage_OnlyShowUpdates}"
                                 Unchecked="OnlyShowUpdatesCheckBox_OnChecked" />
 
+                            <wpfui:Button
+                                x:Name="_installAllUpdatesButton"
+                                Grid.Column="2"
+                                Margin="16,0,0,0"
+                                Appearance="Primary"
+                                Click="InstallAllUpdatesButton_Click"
+                                Content="Install driver updates"
+                                Icon="Play24"
+                                Visibility="Collapsed" />
+
                             <ComboBox
                                 x:Name="_sortingComboBox"
-                                Grid.Column="3"
+                                Grid.Column="4"
                                 MaxDropDownHeight="Auto"
                                 SelectedIndex="2"
                                 SelectionChanged="SortingComboBox_SelectionChanged">

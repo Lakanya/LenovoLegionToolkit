@@ -8,7 +8,11 @@ namespace LenovoLegionToolkit.WPF.Controls;
 
 public abstract class AbstractRefreshingControl : UserControl
 {
+    private const long MinAutoRefreshIntervalTicks = 1500 * TimeSpan.TicksPerMillisecond;
+
     private Task? _refreshTask;
+    private bool _hasLoadedOnce;
+    private long _lastRefreshCompletedTicks;
 
     protected bool IsRefreshing => _refreshTask is not null;
 
@@ -31,8 +35,13 @@ public abstract class AbstractRefreshingControl : UserControl
 
     private async void RefreshingControl_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (IsVisible)
-            await RefreshAsync();
+        if (!IsVisible)
+            return;
+
+        if (_hasLoadedOnce && (DateTime.UtcNow.Ticks - _lastRefreshCompletedTicks) < MinAutoRefreshIntervalTicks)
+            return;
+
+        await RefreshAsync();
     }
 
     protected async Task RefreshAsync()
@@ -43,11 +52,13 @@ public abstract class AbstractRefreshingControl : UserControl
 
         try
         {
-            if (DisablesWhileRefreshing)
+            if (DisablesWhileRefreshing && !_hasLoadedOnce)
                 IsEnabled = false;
 
             _refreshTask ??= OnRefreshAsync();
             await _refreshTask;
+            _hasLoadedOnce = true;
+            _lastRefreshCompletedTicks = DateTime.UtcNow.Ticks;
         }
         catch (NotSupportedException)
         {

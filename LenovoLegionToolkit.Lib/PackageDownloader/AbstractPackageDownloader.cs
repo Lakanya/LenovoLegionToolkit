@@ -29,12 +29,17 @@ public abstract class AbstractPackageDownloader(HttpClientFactory httpClientFact
 
         await TryValidateChecksum(package, tempPath, httpClient, token).ConfigureAwait(false);
 
-        var filename = SanitizeFileName(package.Title) + " - " + package.FileName;
-        var finalPath = Path.Combine(location, filename);
+        var finalPath = GetExpectedFilePath(package, location);
 
         File.Move(tempPath, finalPath, true);
 
         return finalPath;
+    }
+
+    public static string GetExpectedFilePath(Package package, string location)
+    {
+        var filename = SanitizeFileName(package.Title) + " - " + package.FileName;
+        return Path.Combine(location, filename);
     }
 
     private static async Task TryValidateChecksum(Package package, string tempPath, HttpClient httpClient, CancellationToken token)

@@ -21,6 +21,8 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
     private readonly object _muteStateLock = new();
     private MMDeviceEnumerator? _enumerator;
     private MMDevice? _speakerDevice;
+    private string? _speakerDeviceId;
+    private string? _speakerDeviceName;
     private bool _disposed;
 
     private bool? _lastMuteState;
@@ -46,17 +48,21 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
             {
                 try
                 {
+                    _speakerDeviceId = _speakerDevice.ID;
+                    _speakerDeviceName = _speakerDevice.FriendlyName;
                     _lastMuteState = _speakerDevice.AudioEndpointVolume.Mute;
                     _speakerDevice.AudioEndpointVolume.OnVolumeNotification += OnSpeakerVolumeNotification;
-                    Log.Instance.Trace($"VolumeListener started. [device={_speakerDevice.FriendlyName}, mute={_lastMuteState}]");
+                    Log.Instance.Trace($"VolumeListener started. [device={_speakerDeviceName}, mute={_lastMuteState}]");
 
                     await SpecialKeyLedHelper.SetLedAsync(_lastMuteState.Value ? SpecialKeyLedState.SpeakerOn : SpecialKeyLedState.SpeakerOff).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    Log.Instance.Trace($"VolumeListener: failed to init device [{_speakerDevice.FriendlyName}]: {ex.Message}");
+                    Log.Instance.Trace($"VolumeListener: failed to init device [{_speakerDeviceName}]: {ex.Message}");
                     _speakerDevice.Dispose();
                     _speakerDevice = null;
+                    _speakerDeviceId = null;
+                    _speakerDeviceName = null;
                     _lastMuteState = null;
                 }
             }
@@ -74,10 +80,18 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
     public Task StopAsync()
     {
         if (_speakerDevice != null)
-            _speakerDevice.AudioEndpointVolume.OnVolumeNotification -= OnSpeakerVolumeNotification;
+        {
+            try
+            {
+                _speakerDevice.AudioEndpointVolume.OnVolumeNotification -= OnSpeakerVolumeNotification;
+                _speakerDevice.Dispose();
+            }
+            catch { /* Ignore cross-apartment disposal errors */ }
+        }
 
-        _speakerDevice?.Dispose();
         _speakerDevice = null;
+        _speakerDeviceId = null;
+        _speakerDeviceName = null;
 
         if (_enumerator != null)
         {
@@ -161,7 +175,7 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
     {
         Log.Instance.Trace($"VolumeListener OnDeviceRemoved: id={deviceId}");
 
-        if (_speakerDevice?.ID == deviceId)
+        if (_speakerDeviceId == deviceId)
         {
             Log.Instance.Trace($"VolumeListener: tracked device removed, syncing to active device.");
             ScheduleSync(SyncToActiveDevice);
@@ -180,13 +194,14 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
 
     private void HandleDeviceNotification(string deviceId)
     {
-        try
+        ScheduleSync(() =>
         {
-            var device = _enumerator?.GetDevice(deviceId);
+            using var enumerator = new MMDeviceEnumerator();
+            var device = enumerator.GetDevice(deviceId);
             if (device == null)
             {
                 Log.Instance.Trace($"VolumeListener: GetDevice({deviceId}) returned null on notification, syncing to be safe.");
-                ScheduleSync(SyncToActiveDevice);
+                SyncToActiveDevice();
                 return;
             }
 
@@ -194,12 +209,8 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
             device.Dispose();
 
             if (isRender)
-                ScheduleSync(SyncToActiveDevice);
-        }
-        catch (Exception ex)
-        {
-            Log.Instance.Trace($"VolumeListener HandleDeviceNotification error: {ex.Message}", ex);
-        }
+                SyncToActiveDevice();
+        });
     }
 
     private void ScheduleSync(Action syncAction)
@@ -217,6 +228,9 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
 
             try
             {
+                if (_enumerator == null || _disposed)
+                    return;
+
                 syncAction();
             }
             catch (Exception ex)
@@ -232,9 +246,9 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
 
     private void SyncToActiveDevice()
     {
-        var enumerator = _enumerator;
-        if (enumerator == null) return;
+        if (_enumerator == null) return;
 
+        using var enumerator = new MMDeviceEnumerator();
         MMDevice? device = null;
         try
         {
@@ -257,9 +271,9 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
 
     private void SyncToDevice(string deviceId)
     {
-        var enumerator = _enumerator;
-        if (enumerator == null) return;
+        if (_enumerator == null) return;
 
+        using var enumerator = new MMDeviceEnumerator();
         var device = enumerator.GetDevice(deviceId);
 
         if (device == null)
@@ -274,9 +288,12 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
 
     private void SubscribeToDevice(MMDevice device)
     {
-        if (_speakerDevice?.ID == device.ID)
+        var newDeviceId = device.ID;
+        var newDeviceName = device.FriendlyName;
+
+        if (_speakerDeviceId == newDeviceId)
         {
-            Log.Instance.Trace($"VolumeListener: already tracking device [{device.FriendlyName}], skipping.");
+            Log.Instance.Trace($"VolumeListener: already tracking device [{newDeviceName}], skipping.");
             device.Dispose();
             return;
         }
@@ -290,22 +307,29 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
         }
         catch (Exception ex)
         {
-            Log.Instance.Trace($"VolumeListener: failed to read mute state from [{device.FriendlyName}]: {ex.Message}");
+            Log.Instance.Trace($"VolumeListener: failed to read mute state from [{newDeviceName}]: {ex.Message}");
             device.Dispose();
             return;
         }
 
         if (_speakerDevice != null)
         {
-            _speakerDevice.AudioEndpointVolume.OnVolumeNotification -= OnSpeakerVolumeNotification;
-            Log.Instance.Trace($"VolumeListener unsubscribed from: {_speakerDevice.FriendlyName}");
-            _speakerDevice.Dispose();
+            var oldName = _speakerDeviceName;
+            try
+            {
+                _speakerDevice.AudioEndpointVolume.OnVolumeNotification -= OnSpeakerVolumeNotification;
+                _speakerDevice.Dispose();
+            }
+            catch { /* Ignore cross-apartment disposal errors */ }
+            Log.Instance.Trace($"VolumeListener unsubscribed from: {oldName}");
         }
 
         _speakerDevice = device;
+        _speakerDeviceId = newDeviceId;
+        _speakerDeviceName = newDeviceName;
         _lastMuteState = newMute;
         device.AudioEndpointVolume.OnVolumeNotification += OnSpeakerVolumeNotification;
-        Log.Instance.Trace($"VolumeListener subscribed. [device={device.FriendlyName}, mute={_lastMuteState}, previousMute={previousMute}]");
+        Log.Instance.Trace($"VolumeListener subscribed. [device={newDeviceName}, mute={_lastMuteState}, previousMute={previousMute}]");
 
         _ = SpecialKeyLedHelper.SetLedAsync(newMute ? SpecialKeyLedState.SpeakerOn : SpecialKeyLedState.SpeakerOff);
 
@@ -320,9 +344,16 @@ public class VolumeListener : IListener<VolumeListener.ChangedEventArgs>, IMMNot
     {
         if (_speakerDevice == null) return;
 
-        _speakerDevice.AudioEndpointVolume.OnVolumeNotification -= OnSpeakerVolumeNotification;
-        _speakerDevice.Dispose();
+        try
+        {
+            _speakerDevice.AudioEndpointVolume.OnVolumeNotification -= OnSpeakerVolumeNotification;
+            _speakerDevice.Dispose();
+        }
+        catch { /* Ignore cross-apartment disposal errors */ }
+
         _speakerDevice = null;
+        _speakerDeviceId = null;
+        _speakerDeviceName = null;
         _lastMuteState = null;
         Log.Instance.Trace($"VolumeListener: no render devices, cleared tracked device.");
     }

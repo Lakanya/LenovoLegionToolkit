@@ -675,6 +675,12 @@ public struct Package
     public string FileLocation { get; init; }
     public bool IsUpdate { get; init; }
     public RebootType Reboot { get; init; }
+    public string? InstallCommand { get; init; }
+
+    public bool IsBiosUpdate =>
+        (Category?.Contains("BIOS", StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (Category?.Contains("Firmware", StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (Title?.Contains("BIOS", StringComparison.OrdinalIgnoreCase) ?? false);
 
     private string? _index;
 

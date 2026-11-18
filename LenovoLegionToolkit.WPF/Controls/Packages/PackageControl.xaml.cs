@@ -1,7 +1,9 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -23,6 +25,8 @@ public partial class PackageControl : IProgress<float>
     private CancellationTokenSource? _downloadPackageTokenSource;
 
     public bool IsDownloading { get; private set; }
+
+    public Package Package => _package;
 
     public PackageControl(IPackageDownloader packageDownloader, Package package, Func<string> getDownloadPath)
     {
@@ -149,6 +153,80 @@ public partial class PackageControl : IProgress<float>
 
         if (result)
             await SnackbarHelper.ShowAsync(Resource.PackageControl_DownloadComplete_Title, string.Format(Resource.PackageControl_DownloadComplete_Message, _package.FileName));
+    }
+
+    private async void InstallButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_package.IsBiosUpdate)
+        {
+            var confirmed = await MessageBoxHelper.ShowAsync(
+                this,
+                "BIOS / Firmware Update",
+                $"'{_package.Title}' ({_package.Version}) will launch Lenovo's official firmware updater.\n\nMake sure AC power is plugged in and do not power off during flashing. Continue?");
+            if (!confirmed)
+                return;
+        }
+
+        await DownloadAndInstallInternalAsync();
+    }
+
+    public async Task<PackageInstallResult> DownloadAndInstallInternalAsync()
+    {
+        IsDownloading = true;
+        try
+        {
+            _idleStackPanel.Visibility = Visibility.Collapsed;
+            _downloadingStackPanel.Visibility = Visibility.Visible;
+
+            if (_downloadPackageTokenSource is not null)
+                await _downloadPackageTokenSource.CancelAsync();
+
+            _downloadPackageTokenSource = new();
+            var token = _downloadPackageTokenSource.Token;
+
+            var downloadDir = _getDownloadPath();
+            var expectedPath = AbstractPackageDownloader.GetExpectedFilePath(_package, downloadDir);
+            var installerPath = File.Exists(expectedPath)
+                ? expectedPath
+                : await _packageDownloader.DownloadPackageFileAsync(_package, downloadDir, this, token);
+
+            _downloadProgressRing.IsIndeterminate = true;
+            _downloadProgressLabel.Content = "Installing...";
+
+            var installResult = await Task.Run(() => PackageInstaller.InstallAsync(_package, installerPath, token), token);
+
+            if (installResult.Success)
+            {
+                var msg = installResult.RebootRequired
+                    ? $"Installed {_package.Title} ({_package.Version}). A system restart is recommended."
+                    : $"Successfully installed {_package.Title} ({_package.Version}).";
+                await SnackbarHelper.ShowAsync("Installation complete", msg, installResult.RebootRequired ? SnackbarType.Info : SnackbarType.Success);
+            }
+            else
+            {
+                await SnackbarHelper.ShowAsync("Installation failed", installResult.ErrorMessage ?? $"Exit code {installResult.ExitCode}", SnackbarType.Error);
+            }
+
+            return installResult;
+        }
+        catch (OperationCanceledException)
+        {
+            return new(false, false, -1, "Canceled");
+        }
+        catch (Exception ex)
+        {
+            Log.Instance.Trace($"Error occurred when installing package.", ex);
+            await SnackbarHelper.ShowAsync(Resource.PackageControl_GeneralError_Title, ex.Message, SnackbarType.Error);
+            return new(false, false, -1, ex.Message);
+        }
+        finally
+        {
+            _idleStackPanel.Visibility = Visibility.Visible;
+            _downloadingStackPanel.Visibility = Visibility.Collapsed;
+            _downloadProgressRing.Progress = 0;
+            _downloadProgressLabel.Content = null;
+            IsDownloading = false;
+        }
     }
 
     private void CancelDownloadButton_Click(object sender, RoutedEventArgs e) => _downloadPackageTokenSource?.Cancel();

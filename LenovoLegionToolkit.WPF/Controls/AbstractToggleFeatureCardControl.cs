@@ -86,10 +86,19 @@ public abstract class AbstractToggleFeatureCardControl<T> : AbstractRefreshingCo
 
     protected override async Task OnRefreshAsync()
     {
-        if (!await Feature.IsSupportedAsync())
+        var (isSupported, state) = await Task.Run(async () =>
+        {
+            if (!await Feature.IsSupportedAsync().ConfigureAwait(false))
+                return (false, default(T));
+
+            var currentState = await Feature.GetStateAsync().ConfigureAwait(false);
+            return (true, currentState);
+        });
+
+        if (!isSupported)
             throw new NotSupportedException();
 
-        _toggle.IsChecked = OnState.Equals(await Feature.GetStateAsync());
+        _toggle.IsChecked = OnState.Equals(state);
         _toggle.Visibility = Visibility.Visible;
     }
 

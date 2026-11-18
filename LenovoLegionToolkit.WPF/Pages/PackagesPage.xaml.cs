@@ -29,8 +29,11 @@ namespace LenovoLegionToolkit.WPF.Pages;
 
 public partial class PackagesPage : IProgress<float>
 {
+    public static bool OpenUpdatesOnly { get; set; }
+
     private readonly PackageDownloaderSettings _packageDownloaderSettings = IoCContainer.Resolve<PackageDownloaderSettings>();
     private readonly PackageDownloaderFactory _packageDownloaderFactory = IoCContainer.Resolve<PackageDownloaderFactory>();
+    private readonly DriverUpdateChecker _driverUpdateChecker = IoCContainer.Resolve<DriverUpdateChecker>();
 
     private IPackageDownloader? _packageDownloader;
 
@@ -43,6 +46,7 @@ public partial class PackagesPage : IProgress<float>
     public PackagesPage()
     {
         Initialized += PackagesPage_Initialized;
+        Loaded += PackagesPage_Loaded;
 
         InitializeComponent();
     }
@@ -61,8 +65,39 @@ public partial class PackagesPage : IProgress<float>
         _downloadPackagesButton.IsEnabled = true;
         _cancelDownloadPackagesButton.IsEnabled = true;
 
+        _sourceSmartRadio.Tag = PackageDownloaderFactory.Type.Smart;
         _sourcePrimaryRadio.Tag = PackageDownloaderFactory.Type.Vantage;
         _sourceSecondaryRadio.Tag = PackageDownloaderFactory.Type.PCSupport;
+
+        if (_driverUpdateChecker.CachedPackages is { Count: > 0 } cached)
+        {
+            _packageDownloader = _packageDownloaderFactory.GetInstance(PackageDownloaderFactory.Type.Smart);
+            _packages = cached.ToList();
+            _onlyShowUpdatesCheckBox.Visibility = Visibility.Visible;
+            _onlyShowUpdatesCheckBox.IsChecked = OpenUpdatesOnly || _packageDownloaderSettings.Store.OnlyShowUpdates;
+            _loader.Visibility = Visibility.Visible;
+            _loader.IsLoading = false;
+            Reload();
+        }
+    }
+
+    private void PackagesPage_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (!OpenUpdatesOnly)
+            return;
+
+        OpenUpdatesOnly = false;
+        if (_driverUpdateChecker.CachedPackages is { Count: > 0 } cached)
+        {
+            _sourceSmartRadio.IsChecked = true;
+            _packageDownloader = _packageDownloaderFactory.GetInstance(PackageDownloaderFactory.Type.Smart);
+            _packages = cached.ToList();
+            _onlyShowUpdatesCheckBox.Visibility = Visibility.Visible;
+            _onlyShowUpdatesCheckBox.IsChecked = true;
+            _loader.Visibility = Visibility.Visible;
+            _loader.IsLoading = false;
+            Reload();
+        }
     }
 
     public void Report(float value) => Dispatcher.Invoke(() =>
@@ -150,27 +185,20 @@ public partial class PackagesPage : IProgress<float>
 
             var token = _getPackagesTokenSource.Token;
 
-            var packageDownloaderType = new[] { _sourcePrimaryRadio, _sourceSecondaryRadio }
+            var packageDownloaderType = new[] { _sourceSmartRadio, _sourcePrimaryRadio, _sourceSecondaryRadio }
                 .Where(r => r.IsChecked == true)
                 .Select(r => (PackageDownloaderFactory.Type)r.Tag)
                 .First();
 
-            switch (packageDownloaderType)
-            {
-                case PackageDownloaderFactory.Type.Vantage:
-                    _onlyShowUpdatesCheckBox.Visibility = Visibility.Visible;
-                    _onlyShowUpdatesCheckBox.IsChecked = _packageDownloaderSettings.Store.OnlyShowUpdates;
-                    break;
-                default:
-                    _onlyShowUpdatesCheckBox.Visibility = Visibility.Hidden;
-                    _onlyShowUpdatesCheckBox.IsChecked = false;
-                    break;
-            }
+            _onlyShowUpdatesCheckBox.Visibility = Visibility.Visible;
+            _onlyShowUpdatesCheckBox.IsChecked = _packageDownloaderSettings.Store.OnlyShowUpdates;
 
             _packageDownloader = _packageDownloaderFactory.GetInstance(packageDownloaderType);
             var packages = await _packageDownloader.GetPackagesAsync(machineType, os, this, token);
 
             _packages = packages;
+            if (packageDownloaderType == PackageDownloaderFactory.Type.Smart)
+                _driverUpdateChecker.UpdateCache(packages);
 
             Reload();
         }
@@ -354,6 +382,12 @@ public partial class PackagesPage : IProgress<float>
 
         var packages = SortAndFilter(_packages);
 
+        var driverUpdateCount = _packages.Count(p => p.IsUpdate && !p.IsBiosUpdate && !_packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id));
+        _installAllUpdatesButton.Visibility = driverUpdateCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _installAllUpdatesButton.Content = driverUpdateCount > 1
+            ? $"Install {driverUpdateCount} driver updates"
+            : "Install 1 driver update";
+
         foreach (var package in packages)
         {
             var control = new PackageControl(_packageDownloader, package, GetDownloadLocation)
@@ -392,6 +426,46 @@ public partial class PackagesPage : IProgress<float>
                 Reload();
             };
             _packagesStackPanel.Children.Add(clearHidden);
+        }
+    }
+
+    private async void InstallAllUpdatesButton_Click(object sender, RoutedEventArgs e)
+    {
+        var controls = _packagesStackPanel.Children
+            .OfType<PackageControl>()
+            .Where(c => c.Package.IsUpdate && !c.Package.IsBiosUpdate)
+            .ToArray();
+
+        if (controls.Length == 0)
+            return;
+
+        _installAllUpdatesButton.IsEnabled = false;
+        try
+        {
+            var anyReboot = false;
+            var installedCount = 0;
+
+            foreach (var control in controls)
+            {
+                var res = await control.DownloadAndInstallInternalAsync();
+                if (res.Success)
+                {
+                    installedCount++;
+                    anyReboot |= res.RebootRequired;
+                }
+            }
+
+            if (installedCount > 0)
+            {
+                var msg = anyReboot
+                    ? $"Installed {installedCount} driver update(s). Please restart Windows to finish applying changes."
+                    : $"Installed {installedCount} driver update(s).";
+                await SnackbarHelper.ShowAsync("Batch update complete", msg, anyReboot ? SnackbarType.Info : SnackbarType.Success);
+            }
+        }
+        finally
+        {
+            _installAllUpdatesButton.IsEnabled = true;
         }
     }
 

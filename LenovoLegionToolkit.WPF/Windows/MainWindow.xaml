@@ -25,10 +25,11 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Rectangle
-            Grid.RowSpan="8"
+            Grid.RowSpan="9"
             IsHitTestVisible="False">
             <Rectangle.Fill>
                 <ImageBrush x:Name="_backgroundImage" />
@@ -40,7 +41,7 @@
 
         <Rectangle
             x:Name="_backgroundDimOverlay"
-            Grid.RowSpan="8"
+            Grid.RowSpan="9"
             Fill="{DynamicResource ApplicationBackgroundBrush}"
             IsHitTestVisible="False" />
 
@@ -321,6 +322,28 @@
                     KeyDown="SupportIndicator_KeyDown"
                     Text="{x:Static resources:Resource.MainWindow_SupportIndicator}"
                     VerticalAlignment="Center" />
+            </StackPanel>
+        </Border>
+
+        <Border
+            x:Name="_driverUpdateIndicator"
+            Grid.Row="8"
+            Padding="8,4,8,6"
+            Background="{DynamicResource SystemFillColorSuccessBackgroundBrush}"
+            Cursor="Hand"
+            MouseLeftButtonDown="DriverUpdateIndicator_Click"
+            MouseRightButtonDown="DriverUpdateIndicator_Click"
+            Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
+                <wpfui:SymbolIcon
+                    Margin="0,0,6,0"
+                    Foreground="{DynamicResource SystemFillColorSuccessBrush}"
+                    Symbol="Box24" />
+                <TextBlock
+                    x:Name="_driverUpdateIndicatorText"
+                    Focusable="True"
+                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                    Text="Driver / BIOS update available" />
             </StackPanel>
         </Border>
 

@@ -22,6 +22,7 @@ using LenovoLegionToolkit.Lib.Extensions;
 using LenovoLegionToolkit.Lib.Listeners;
 using LenovoLegionToolkit.Lib.Messaging;
 using LenovoLegionToolkit.Lib.Messaging.Messages;
+using LenovoLegionToolkit.Lib.PackageDownloader;
 using LenovoLegionToolkit.Lib.Settings;
 using LenovoLegionToolkit.Lib.SoftwareDisabler;
 using LenovoLegionToolkit.Lib.Station.Services;
@@ -52,6 +53,7 @@ public partial class MainWindow
     private readonly FnKeysDisabler _fnKeysDisabler = IoCContainer.Resolve<FnKeysDisabler>();
     private readonly INavigationService _extensionNavigationService = IoCContainer.Resolve<INavigationService>();
     private readonly UpdateChecker _updateChecker = IoCContainer.Resolve<UpdateChecker>();
+    private readonly DriverUpdateChecker _driverUpdateChecker = IoCContainer.Resolve<DriverUpdateChecker>();
     private readonly ThemeManager _themeManager = IoCContainer.Resolve<ThemeManager>();
 
     private const double CompactMinWidth = 550;
@@ -211,6 +213,7 @@ public partial class MainWindow
             _fnKeysIndicator.Padding = new Thickness(4, 2, 4, 2);
             _updateIndicator.Padding = new Thickness(4, 2, 4, 2);
             _supportIndicator.Padding = new Thickness(4, 2, 4, 2);
+            _driverUpdateIndicator.Padding = new Thickness(4, 2, 4, 2);
         }
     }
 
@@ -557,7 +560,36 @@ public partial class MainWindow
                                     MessagingCenter.Publish(new NotificationMessage(NotificationType.UpdateAvailable, versionNumber));
                             }
                         }, TaskScheduler.FromCurrentSynchronizationContext());
+
+            Task.Run(() => _driverUpdateChecker.CheckAsync(manualCheck))
+                .ContinueWith(driverTask =>
+                {
+                    if (driverTask.IsFaulted || driverTask.IsCanceled)
+                        return;
+
+                    var updates = driverTask.Result;
+                    if (updates.Count == 0)
+                    {
+                        _driverUpdateIndicator.Visibility = Visibility.Collapsed;
+                        return;
+                    }
+
+                    var biosUpdate = updates.FirstOrDefault(u => u.IsBiosUpdate);
+                    _driverUpdateIndicatorText.Text = biosUpdate.Title is not null
+                        ? (updates.Count == 1
+                            ? $"BIOS / Firmware update available: {biosUpdate.Version} — Click to view & install"
+                            : $"BIOS ({biosUpdate.Version}) + {updates.Count - 1} driver update(s) available — Click to view & install")
+                        : $"{updates.Count} Lenovo driver update(s) available — Click to view & install";
+
+                    _driverUpdateIndicator.Visibility = Visibility.Visible;
+                }, TaskScheduler.FromCurrentSynchronizationContext());
         }
+    }
+
+    private void DriverUpdateIndicator_Click(object sender, MouseButtonEventArgs e)
+    {
+        PackagesPage.OpenUpdatesOnly = true;
+        _navigationStore.Navigate("packages");
     }
 
     private void RestoreSize()
