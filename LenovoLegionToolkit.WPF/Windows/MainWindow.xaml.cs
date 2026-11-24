@@ -276,14 +276,18 @@ public partial class MainWindow
 
     private void MainWindow_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
+        if (IsVisible)
+            WindowExtensions.RestoreNormalPriority();
+
         var settings = IoCContainer.Resolve<ApplicationSettings>();
         ApplyWindowLock(settings.Store.LockWindowSize);
         Topmost = settings.Store.AlwaysOnTop;
 
-        UpdateEfficiencyMode();
-
         if (!IsVisible)
+        {
+            UpdateEfficiencyMode();
             return;
+        }
 
         CheckForUpdates();
         SetVisual();

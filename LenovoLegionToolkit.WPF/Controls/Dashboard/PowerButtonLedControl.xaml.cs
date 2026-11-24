@@ -26,11 +26,20 @@ public partial class PowerButtonLedControl
 
     protected override async Task OnRefreshAsync()
     {
-        if (!await _powerButtonLed.IsSupportedAsync())
+        var (supported, syncEnabled, brightnessSupported) = await Task.Run(async () =>
+        {
+            if (!await _powerButtonLed.IsSupportedAsync().ConfigureAwait(false))
+                return (false, false, false);
+
+            var sync = await _powerButtonLed.GetSyncEnabledAsync().ConfigureAwait(false);
+            var brightness = await _powerButtonLed.IsBrightnessSupportedAsync().ConfigureAwait(false);
+            return (true, sync, brightness);
+        });
+
+        if (!supported)
             throw new NotSupportedException();
 
-        var syncEnabled = await _powerButtonLed.GetSyncEnabledAsync();
-        _brightnessSupported = await _powerButtonLed.IsBrightnessSupportedAsync();
+        _brightnessSupported = brightnessSupported;
 
         try
         {

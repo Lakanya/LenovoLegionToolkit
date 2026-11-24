@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using LenovoLegionToolkit.Lib.Features.Hybrid;
 using LenovoLegionToolkit.Lib.Listeners;
@@ -25,6 +26,8 @@ public class GPUOverclockController
     private readonly LegionSpaceDisabler _legionSpaceDisabler;
     private readonly LegionZoneDisabler _legionZoneDisabler;
     private readonly NativeWindowsMessageListener _nativeWindowsMessageListener;
+    private readonly SemaphoreSlim _supportLock = new(1, 1);
+    private bool? _isSupportedCache;
 
     public event EventHandler? Changed;
 
@@ -49,16 +52,34 @@ public class GPUOverclockController
             return true;
         }
 
-        var isSupported = NVAPI.IsAvailable();
+        if (_isSupportedCache is { } cached)
+        {
+            return cached;
+        }
 
-        Log.Instance.Trace($"NVAPI status: {isSupported}.");
-
-        if (!isSupported)
-            return isSupported;
-
+        await _supportLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            isSupported = await WMI.LenovoGameZoneData.IsSupportGpuOCAsync().ConfigureAwait(false) > 0;
+            if (_isSupportedCache is { } cachedInsideLock)
+            {
+                return cachedInsideLock;
+            }
+
+            var isSupported = false;
+            try
+            {
+                isSupported = await WMI.LenovoGameZoneData.IsSupportGpuOCAsync().ConfigureAwait(false) > 0;
+            }
+            catch
+            {
+                isSupported = false;
+            }
+
+            if (isSupported)
+            {
+                isSupported = await Task.Run(NVAPI.IsAvailable).ConfigureAwait(false);
+                Log.Instance.Trace($"NVAPI status: {isSupported}.");
+            }
 
             if (!isSupported)
             {
@@ -68,15 +89,15 @@ public class GPUOverclockController
                 _settings.Store.Info = GPUOverclockInfo.Zero;
                 _settings.SynchronizeStore();
             }
+
+            Log.Instance.Trace($"Supports GPU OC status: {isSupported}");
+            _isSupportedCache = isSupported;
+            return isSupported;
         }
-        catch
+        finally
         {
-            isSupported = false;
+            _supportLock.Release();
         }
-
-        Log.Instance.Trace($"Supports GPU OC status: {isSupported}");
-
-        return isSupported;
     }
 
     public (bool, GPUOverclockInfo) GetState() => (_settings.Store.Enabled, _settings.Store.Info);
@@ -212,6 +233,9 @@ public class GPUOverclockController
     {
         if (e.Message is not NativeWindowsMessage.DisplayDeviceChanged and not NativeWindowsMessage.MonitorOn)
             return;
+
+        if (e.Message == NativeWindowsMessage.DisplayDeviceChanged)
+            _isSupportedCache = null;
 
         if (await IsSupportedAsync().ConfigureAwait(false))
             await ApplyStateAsync().ConfigureAwait(false);

@@ -37,7 +37,7 @@ public partial class DiscreteGPUControl
         if (!IsVisible || Window.GetWindow(this)?.WindowState == WindowState.Minimized)
             return;
 
-        if (!_gpuController.IsSupported())
+        if (!await Task.Run(() => _gpuController.IsSupported()))
             throw new InvalidOperationException("Unsupported operation");
 
         if (_gpuController.LastKnownStatus is { } cachedStatus && cachedStatus.State != GPUState.Unknown)

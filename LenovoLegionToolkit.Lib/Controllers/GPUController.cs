@@ -45,7 +45,8 @@ public class GPUController
     public event EventHandler<GPUStatus>? Refreshed;
     public bool IsStarted => _refreshCancellationTokenSource is not null;
 
-    public bool IsSupported() => NVAPI.IsAvailable();
+    public bool IsSupported() =>
+        LastKnownStatus is { State: not GPUState.Unknown and not GPUState.NvidiaGpuNotFound } || NVAPI.IsAvailable();
 
     public async Task<GPUState> GetLastKnownStateAsync()
     {

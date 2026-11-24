@@ -20,10 +20,17 @@ public partial class ChargeThresholdControl
 
     protected override async Task OnRefreshAsync()
     {
-        if (!await _feature.IsSupportedAsync())
-            throw new NotSupportedException();
+        var (supported, state) = await Task.Run(async () =>
+        {
+            if (!await _feature.IsSupportedAsync().ConfigureAwait(false))
+                return (false, default(ChargeThreshold));
 
-        var state = await _feature.GetStateAsync();
+            var currentState = await _feature.GetStateAsync().ConfigureAwait(false);
+            return (true, currentState);
+        });
+
+        if (!supported)
+            throw new NotSupportedException();
 
         _toggle.IsChecked = state.Enabled;
         _rangeSlider.Start = state.Start;

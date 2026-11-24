@@ -81,7 +81,7 @@ public class OverclockDiscreteGPUControl : AbstractRefreshingControl
 
     protected override async Task OnRefreshAsync()
     {
-        if (!await _controller.IsSupportedAsync())
+        if (!await Task.Run(() => _controller.IsSupportedAsync()))
             throw new NotSupportedException();
 
         var (enabled, _) = _controller.GetState();
@@ -95,13 +95,15 @@ public class OverclockDiscreteGPUControl : AbstractRefreshingControl
             return;
 
         Visibility = Visibility.Visible;
-        await RefreshAsync();
+        if (IsVisible)
+            await RefreshAsync();
     }
 
     private void Controller_Changed(object? sender, EventArgs e) => Dispatcher.Invoke(async () =>
     {
         Visibility = Visibility.Visible;
-        await RefreshAsync();
+        if (IsVisible)
+            await RefreshAsync();
     });
 
     private async void Toggle_Click(object sender, RoutedEventArgs e)

@@ -80,7 +80,7 @@ public class TrayHelper : IDisposable
                 _contextMenu.IsOpen = false;
                 _bringToForeground();
 
-                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                await Task.Delay(TimeSpan.FromMilliseconds(50));
                 navigation.Navigate(navigationItem.PageTag);
             };
             _contextMenu.Items.Add(navigationMenuItem);
