@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using LenovoLegionToolkit.Lib;
 using LenovoLegionToolkit.Lib.Controllers;
+using LenovoLegionToolkit.Lib.Services;
+using LenovoLegionToolkit.Lib.Settings;
 using LenovoLegionToolkit.Lib.SoftwareDisabler;
 using LenovoLegionToolkit.Lib.Utils;
 using LenovoLegionToolkit.WPF.Resources;
@@ -17,6 +19,8 @@ public partial class SettingsSoftwareControlControl
     private readonly LegionZoneDisabler _legionZoneDisabler = IoCContainer.Resolve<LegionZoneDisabler>();
     private readonly FnKeysDisabler _fnKeysDisabler = IoCContainer.Resolve<FnKeysDisabler>();
     private readonly RGBKeyboardBacklightController _rgbKeyboardBacklightController = IoCContainer.Resolve<RGBKeyboardBacklightController>();
+    private readonly ShellFreezeGuardService _shellFreezeGuardService = IoCContainer.Resolve<ShellFreezeGuardService>();
+    private readonly ApplicationSettings _applicationSettings = IoCContainer.Resolve<ApplicationSettings>();
 
     private bool _isRefreshing;
 
@@ -51,6 +55,8 @@ public partial class SettingsSoftwareControlControl
         _legionSpaceToggle.Visibility = Visibility.Visible;
         _legionZoneToggle.Visibility = Visibility.Visible;
         _fnKeysToggle.Visibility = Visibility.Visible;
+
+        _shellFreezeGuardToggle.IsChecked = _applicationSettings.Store.ShellFreezeGuardEnabled && _shellFreezeGuardService.IsApplied();
 
         _isRefreshing = false;
 
@@ -316,5 +322,65 @@ public partial class SettingsSoftwareControlControl
 
         var fnKeysStatus = state.Value ? SoftwareStatus.Disabled : SoftwareStatus.Enabled;
         FnKeysStatusChanged?.Invoke(this, fnKeysStatus);
+    }
+
+    private async void ShellFreezeGuardToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isRefreshing)
+            return;
+
+        _shellFreezeGuardToggle.IsEnabled = false;
+
+        try
+        {
+            var enabled = _shellFreezeGuardToggle.IsChecked ?? false;
+            _applicationSettings.Store.ShellFreezeGuardEnabled = enabled;
+            _applicationSettings.SynchronizeStore();
+
+            if (enabled)
+            {
+                await Task.Run(() => _shellFreezeGuardService.Apply());
+                await SnackbarHelper.ShowAsync(
+                    "Shell Freeze Guard enabled",
+                    "AMD & NVIDIA Explorer context menus blocked and LLT pinned to iGPU. Click 'Restart Explorer' if right-click is still cached.",
+                    SnackbarType.Success);
+            }
+            else
+            {
+                await Task.Run(() => _shellFreezeGuardService.Revert());
+                await SnackbarHelper.ShowAsync(
+                    "Shell Freeze Guard disabled",
+                    "Explorer shell extension blocks removed. Restart Explorer for changes to take effect.",
+                    SnackbarType.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Instance.Trace($"Failed to toggle Shell Freeze Guard.", ex);
+            await SnackbarHelper.ShowAsync("Shell Freeze Guard error", ex.Message, SnackbarType.Error);
+        }
+        finally
+        {
+            _shellFreezeGuardToggle.IsEnabled = true;
+        }
+    }
+
+    private async void RestartExplorerButton_Click(object sender, RoutedEventArgs e)
+    {
+        _restartExplorerButton.IsEnabled = false;
+        try
+        {
+            await _shellFreezeGuardService.RestartExplorerAsync();
+            await SnackbarHelper.ShowAsync("Windows Explorer restarted", "Shell extension changes are now active.", SnackbarType.Success);
+        }
+        catch (Exception ex)
+        {
+            Log.Instance.Trace($"Failed to restart Explorer.", ex);
+            await SnackbarHelper.ShowAsync("Restart Explorer failed", ex.Message, SnackbarType.Error);
+        }
+        finally
+        {
+            _restartExplorerButton.IsEnabled = true;
+        }
     }
 }

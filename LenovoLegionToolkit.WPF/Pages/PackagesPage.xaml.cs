@@ -382,7 +382,7 @@ public partial class PackagesPage : IProgress<float>
 
         var packages = SortAndFilter(_packages);
 
-        var driverUpdateCount = _packages.Count(p => p.IsUpdate && !p.IsBiosUpdate && !_packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id));
+        var driverUpdateCount = _packages.Count(p => p.IsUpdate && !p.IsBiosUpdate && !p.IsNvidiaUpstream && !_packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id));
         _installAllUpdatesButton.Visibility = driverUpdateCount > 0 ? Visibility.Visible : Visibility.Collapsed;
         _installAllUpdatesButton.Content = driverUpdateCount > 1
             ? $"Install {driverUpdateCount} driver updates"
@@ -433,7 +433,7 @@ public partial class PackagesPage : IProgress<float>
     {
         var controls = _packagesStackPanel.Children
             .OfType<PackageControl>()
-            .Where(c => c.Package.IsUpdate && !c.Package.IsBiosUpdate)
+            .Where(c => c.Package.IsUpdate && !c.Package.IsBiosUpdate && !c.Package.IsNvidiaUpstream)
             .ToArray();
 
         if (controls.Length == 0)

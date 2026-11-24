@@ -58,6 +58,7 @@ public class ApplicationSettings : AbstractSettings<ApplicationSettingsStore>
         public int LockedPStateId { get; set; } = GPUController.AutoPStateId;
         public PStatePinMode PStatePinMode { get; set; } = PStatePinMode.Max;
         public bool SupportIndicatorDismissed { get; set; }
+        public bool ShellFreezeGuardEnabled { get; set; } = true;
 
     }
     public class GameDetectionSettings

@@ -10,7 +10,8 @@ namespace LenovoLegionToolkit.Lib.PackageDownloader;
 public class SmartPackageDownloader(
     HttpClientFactory httpClientFactory,
     PCSupportPackageDownloader pcSupportPackageDownloader,
-    VantagePackageDownloader vantagePackageDownloader)
+    VantagePackageDownloader vantagePackageDownloader,
+    NvidiaDriverPackageProvider nvidiaDriverPackageProvider)
     : AbstractPackageDownloader(httpClientFactory)
 {
     public override async Task<List<Package>> GetPackagesAsync(string machineType, OS os, IProgress<float>? progress = null, CancellationToken token = default)
@@ -20,11 +21,13 @@ public class SmartPackageDownloader(
         var pcSupportTask = SafeGetAsync(() => pcSupportPackageDownloader.GetPackagesAsync(machineType, os, null, token));
         var vantageProgress = progress is null ? null : new Progress<float>(v => progress.Report(Math.Min(95f, v * 0.95f)));
         var vantageTask = SafeGetAsync(() => vantagePackageDownloader.GetPackagesAsync(machineType, os, vantageProgress, token));
+        var nvidiaTask = SafeGetSingleAsync(() => nvidiaDriverPackageProvider.GetPackageAsync(os, token));
 
-        await Task.WhenAll(pcSupportTask, vantageTask).ConfigureAwait(false);
+        await Task.WhenAll(pcSupportTask, vantageTask, nvidiaTask).ConfigureAwait(false);
 
         var pcSupportPackages = await pcSupportTask.ConfigureAwait(false);
         var vantagePackages = await vantageTask.ConfigureAwait(false);
+        var nvidiaPackage = await nvidiaTask.ConfigureAwait(false);
 
         var vantageByFile = vantagePackages
             .Where(p => !string.IsNullOrWhiteSpace(p.FileName))
@@ -85,8 +88,28 @@ public class SmartPackageDownloader(
             merged.Add(vPkg);
         }
 
+        if (nvidiaPackage is { } nvPkg)
+            merged.Insert(0, nvPkg);
+
         progress?.Report(100);
         return merged;
+    }
+
+    private static async Task<Package?> SafeGetSingleAsync(Func<Task<Package?>> getter)
+    {
+        try
+        {
+            return await getter().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Log.Instance.Trace($"SmartPackageDownloader upstream fetch failed: {ex.Message}", ex);
+            return null;
+        }
     }
 
     private static async Task<List<Package>> SafeGetAsync(Func<Task<List<Package>>> getter)

@@ -80,6 +80,29 @@
                     Click="FnKeysToggle_Click"
                     Visibility="Hidden" />
             </custom:CardControl>
+            <custom:CardControl
+                x:Name="_shellFreezeGuardCard"
+                Margin="0,0,0,8"
+                Icon="ShieldCheckmark24">
+                <custom:CardControl.Header>
+                    <controls:CardHeaderControl
+                        Title="Hybrid GPU &amp; Shell Freeze Guard"
+                        Subtitle="Blocks AMD &amp; NVIDIA Explorer context menus that cause 15s+ right-click freezes when the dGPU sleeps, pins LLT to iGPU, and auto-reapplies on startup." />
+                </custom:CardControl.Header>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <wpfui:Button
+                        x:Name="_restartExplorerButton"
+                        Margin="0,0,12,0"
+                        Click="RestartExplorerButton_Click"
+                        Content="Restart Explorer"
+                        Icon="ArrowClockwise24"
+                        ToolTip="Restart Windows Explorer to apply shell extension changes immediately" />
+                    <wpfui:ToggleSwitch
+                        x:Name="_shellFreezeGuardToggle"
+                        AutomationProperties.Name="Hybrid GPU and Shell Freeze Guard"
+                        Click="ShellFreezeGuardToggle_Click" />
+                </StackPanel>
+            </custom:CardControl>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

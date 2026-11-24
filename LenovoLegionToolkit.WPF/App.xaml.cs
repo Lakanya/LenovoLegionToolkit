@@ -225,6 +225,21 @@ public partial class App
             catch { /* Ignore */ }
         }
 
+        if (settings.Store.ShellFreezeGuardEnabled)
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    IoCContainer.Resolve<ShellFreezeGuardService>().Apply();
+                }
+                catch (Exception ex)
+                {
+                    Log.Instance.Trace($"ShellFreezeGuardService startup check failed.", ex);
+                }
+            });
+        }
+
         CardControl.IsCompact = settings.Store.CompactMode;
 
         ConfigureFeatureFlags();

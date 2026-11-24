@@ -160,6 +160,7 @@ public class IoCModule : Module
         builder.Register<PackageDownloaderFactory>();
         builder.Register<PCSupportPackageDownloader>();
         builder.Register<VantagePackageDownloader>();
+        builder.Register<NvidiaDriverPackageProvider>();
         builder.Register<SmartPackageDownloader>();
         builder.Register<DriverUpdateChecker>().SingleInstance();
 
@@ -169,6 +170,7 @@ public class IoCModule : Module
 
         builder.Register<BatteryDischargeRateMonitorService>();
         builder.Register<DgpuAwakeManager>().SingleInstance();
+        builder.Register<ShellFreezeGuardService>().SingleInstance();
 
         builder.Register<AmdOverclockingController>();
 

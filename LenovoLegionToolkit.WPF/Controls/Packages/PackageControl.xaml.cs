@@ -61,6 +61,11 @@ public partial class PackageControl : IProgress<float>
 
         var showWarning = package.ReleaseDate < DateTime.UtcNow.AddYears(-1);
         _warningTextBlock.Visibility = showWarning ? Visibility.Visible : Visibility.Collapsed;
+
+        if (package.IsNvidiaUpstream)
+        {
+            _installButton.ToolTip = "Open in NVCleanstall (debloated install)";
+        }
     }
 
     private void PackageControl_Unloaded(object sender, RoutedEventArgs e) => _downloadPackageTokenSource?.Cancel();
@@ -157,6 +162,24 @@ public partial class PackageControl : IProgress<float>
 
     private async void InstallButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_package.IsNvidiaUpstream)
+        {
+            _installButton.IsEnabled = false;
+            try
+            {
+                var result = await NVCleanstallLauncher.LaunchOrInstallAsync();
+                await SnackbarHelper.ShowAsync(
+                    "NVCleanstall",
+                    result.Message,
+                    result.Success ? SnackbarType.Success : SnackbarType.Warning);
+            }
+            finally
+            {
+                _installButton.IsEnabled = true;
+            }
+            return;
+        }
+
         if (_package.IsBiosUpdate)
         {
             var confirmed = await MessageBoxHelper.ShowAsync(

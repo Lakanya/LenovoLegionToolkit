@@ -676,6 +676,7 @@ public struct Package
     public bool IsUpdate { get; init; }
     public RebootType Reboot { get; init; }
     public string? InstallCommand { get; init; }
+    public bool IsNvidiaUpstream { get; init; }
 
     public bool IsBiosUpdate =>
         (Category?.Contains("BIOS", StringComparison.OrdinalIgnoreCase) ?? false) ||
