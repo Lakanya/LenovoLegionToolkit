@@ -432,9 +432,7 @@ public partial class MainWindow
 
     private void UpdateSupportIndicator()
     {
-        _supportIndicator.Visibility = !_applicationSettings.Store.SupportIndicatorDismissed
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        _supportIndicator.Visibility = Visibility.Collapsed;
     }
 
     private void SupportIndicator_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => OpenDonatePage();
@@ -494,10 +492,7 @@ public partial class MainWindow
         if (DisableConflictingSoftwareWarning)
             return;
 
-        _vantageDisabler.OnRefreshed += async (_, e) => await Dispatcher.InvokeAsync(() =>
-        {
-            _vantageIndicator.Visibility = e.Status == SoftwareStatus.Enabled ? Visibility.Visible : Visibility.Collapsed;
-        });
+        _vantageIndicator.Visibility = Visibility.Collapsed;
 
         _legionSpaceDisabler.OnRefreshed += async (_, e) => await Dispatcher.InvokeAsync(() =>
         {
