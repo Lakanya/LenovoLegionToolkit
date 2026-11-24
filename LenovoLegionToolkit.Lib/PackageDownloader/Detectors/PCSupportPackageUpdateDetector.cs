@@ -18,6 +18,7 @@ internal partial class PCSupportPackageUpdateDetector
 
     private readonly List<DriverInfo> _driverInfoCache = [];
     private BiosVersion? _currentBios;
+    private string? _currentBiosRaw;
 
     public async Task InitializeAsync()
     {
@@ -25,38 +26,50 @@ internal partial class PCSupportPackageUpdateDetector
         var driversTask = WMI.Win32.PnpSignedDriver.ReadAsync();
         await Task.WhenAll(miTask, driversTask).ConfigureAwait(false);
 
-        _currentBios = (await miTask.ConfigureAwait(false)).BiosVersion;
+        var mi = await miTask.ConfigureAwait(false);
+        _currentBios = mi.BiosVersion;
+        _currentBiosRaw = mi.BiosVersionRaw;
         _driverInfoCache.Clear();
         _driverInfoCache.AddRange(await driversTask.ConfigureAwait(false));
     }
 
-    public (bool IsUpdate, RebootType Reboot) Detect(string category, string title, string versionString, DateTime releaseDate)
+    public static bool IsUtilityCategory(string category, string title) =>
+        category.Contains("Diagnostic", StringComparison.OrdinalIgnoreCase) ||
+        category.Equals("Tool", StringComparison.OrdinalIgnoreCase) ||
+        category.Contains("Software and Utilities", StringComparison.OrdinalIgnoreCase) ||
+        title.Contains("MFGSTAT", StringComparison.OrdinalIgnoreCase) ||
+        title.Contains("Smart Migration", StringComparison.OrdinalIgnoreCase) ||
+        title.Contains("Legion Space", StringComparison.OrdinalIgnoreCase) ||
+        title.Contains("Service Tool", StringComparison.OrdinalIgnoreCase) ||
+        title.Contains("Right to Repair", StringComparison.OrdinalIgnoreCase);
+
+    public (bool IsUpdate, RebootType Reboot, string? InstalledVersion) Detect(string category, string title, string versionString, DateTime releaseDate)
     {
         if (string.IsNullOrWhiteSpace(versionString))
-            return (false, RebootType.NotRequired);
+            return (false, RebootType.NotRequired, null);
 
         // 1. BIOS update check (e.g. RYCN30WW vs installed RYCN29WW)
         var biosMatch = BiosVersionRegex().Match(versionString.Trim());
         if (biosMatch.Success && _currentBios.HasValue)
         {
+            var installedBiosLabel = !string.IsNullOrWhiteSpace(_currentBiosRaw)
+                ? _currentBiosRaw
+                : $"{_currentBios.Value.Prefix}{_currentBios.Value.Version:00}WW";
+
             var prefix = biosMatch.Groups[1].Value.ToUpperInvariant();
             if (int.TryParse(biosMatch.Groups[2].Value, out var pkgBiosNum))
             {
                 var pkgBios = new BiosVersion(prefix, pkgBiosNum);
                 if (_currentBios.Value.IsLowerThan(pkgBios))
-                    return (true, RebootType.Forced);
+                    return (true, RebootType.Forced, installedBiosLabel);
             }
 
-            return (false, RebootType.Forced);
+            return (false, RebootType.Forced, installedBiosLabel);
         }
 
         // Skip pure diagnostic tools / apps / manuals
-        if (category.Contains("Diagnostic", StringComparison.OrdinalIgnoreCase) ||
-            category.Equals("Tool", StringComparison.OrdinalIgnoreCase) ||
-            category.Contains("Software and Utilities", StringComparison.OrdinalIgnoreCase))
-        {
-            return (false, RebootType.NotRequired);
-        }
+        if (IsUtilityCategory(category, title))
+            return (false, RebootType.NotRequired, null);
 
         // 2. Driver version comparison against installed PnP drivers
         var extractedVersions = DottedVersionRegex().Matches(versionString)
@@ -66,11 +79,13 @@ internal partial class PCSupportPackageUpdateDetector
             .ToArray();
 
         if (extractedVersions.Length == 0 || _driverInfoCache.Count == 0)
-            return (false, RebootType.NotRequired);
+            return (false, RebootType.NotRequired, null);
 
         var candidateDrivers = FilterDriversForPackage(category, title);
         if (candidateDrivers.Count == 0)
-            return (false, RebootType.NotRequired);
+            return (false, RebootType.NotRequired, null);
+
+        Version? bestMatchedInstalled = null;
 
         foreach (var pkgVer in extractedVersions)
         {
@@ -83,6 +98,10 @@ internal partial class PCSupportPackageUpdateDetector
             if (matchingInstalled.Length == 0)
                 continue;
 
+            var highestInstalled = matchingInstalled.Max(d => d.Version)!;
+            if (bestMatchedInstalled is null || highestInstalled > bestMatchedInstalled)
+                bestMatchedInstalled = highestInstalled;
+
             var anyOutdated = matchingInstalled.Any(d =>
                 d.Version! < pkgVer &&
                 (d.Date is null || releaseDate.Date >= d.Date.Value.Date));
@@ -90,10 +109,17 @@ internal partial class PCSupportPackageUpdateDetector
             var anyAlreadyNewerOrEqual = matchingInstalled.Any(d => d.Version! >= pkgVer);
 
             if (anyOutdated && !anyAlreadyNewerOrEqual)
-                return (true, RebootType.Requested);
+                return (true, RebootType.Requested, highestInstalled.ToString());
         }
 
-        return (false, RebootType.NotRequired);
+        // Fall back to highest installed version among matched candidates for display even when branches differ
+        bestMatchedInstalled ??= candidateDrivers
+            .Where(d => d.Version is not null)
+            .Select(d => d.Version!)
+            .OrderByDescending(v => v)
+            .FirstOrDefault();
+
+        return (false, RebootType.NotRequired, bestMatchedInstalled?.ToString());
     }
 
     private List<DriverInfo> FilterDriversForPackage(string category, string title)
@@ -107,6 +133,9 @@ internal partial class PCSupportPackageUpdateDetector
             (combined.Contains("Display", StringComparison.OrdinalIgnoreCase) && combined.Contains("AMD", StringComparison.OrdinalIgnoreCase)))
             return _driverInfoCache.Where(d => ContainsId(d, "VEN_1002")).ToList();
 
+        if (combined.Contains("Audio", StringComparison.OrdinalIgnoreCase) || combined.Contains("Realtek Audio", StringComparison.OrdinalIgnoreCase))
+            return _driverInfoCache.Where(d => ContainsId(d, "FUNC_01&VEN_10EC", "HDAUDIO\\FUNC_01", "INTELAUDIO\\FUNC_01")).ToList();
+
         if (combined.Contains("Bluetooth", StringComparison.OrdinalIgnoreCase))
             return _driverInfoCache.Where(d => ContainsId(d, "USB\\VID_0E8D", "USB\\VID_0489", "USB\\VID_13D3", "USB\\VID_0BDA", "USB\\VID_8087")).ToList();
 
@@ -115,6 +144,12 @@ internal partial class PCSupportPackageUpdateDetector
 
         if (combined.Contains("LAN", StringComparison.OrdinalIgnoreCase) || combined.Contains("Ethernet", StringComparison.OrdinalIgnoreCase))
             return _driverInfoCache.Where(d => ContainsId(d, "VEN_10EC&DEV_81", "VEN_10EC&DEV_26", "VEN_8086")).ToList();
+
+        if (combined.Contains("Camera", StringComparison.OrdinalIgnoreCase))
+            return _driverInfoCache.Where(d => ContainsId(d, "USB\\VID_04F2", "USB\\VID_13D3", "USB\\VID_1BCF", "USB\\VID_30C9", "USB\\VID_5986")).ToList();
+
+        if (combined.Contains("Serial IO", StringComparison.OrdinalIgnoreCase) || combined.Contains("AMD DRTM", StringComparison.OrdinalIgnoreCase) || combined.Contains("Chipset", StringComparison.OrdinalIgnoreCase))
+            return _driverInfoCache.Where(d => ContainsId(d, "ACPI\\AMDI", "VEN_1022")).ToList();
 
         if (combined.Contains("Energy Management", StringComparison.OrdinalIgnoreCase))
             return _driverInfoCache.Where(d => ContainsId(d, "VPC2004")).ToList();

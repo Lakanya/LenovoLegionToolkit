@@ -20,10 +20,13 @@ public class DriverUpdateChecker(
 
     public IReadOnlyList<Package>? CachedPackages => _cachedPackages;
 
+    public DateTime LastCheckUtc => _lastCheckUtc;
+
     public IReadOnlyList<Package> AvailableUpdates =>
         _cachedPackages?
-            .Where(p => p.IsUpdate && !packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id))
+            .Where(p => p.IsUpdate && !p.IsUtilityOrTool && !packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id))
             .OrderByDescending(p => p.IsBiosUpdate)
+            .ThenByDescending(p => p.IsNvidiaUpstream)
             .ThenByDescending(p => p.ReleaseDate)
             .ToList() ?? [];
 

@@ -79,8 +79,12 @@ public class PCSupportPackageDownloader(HttpClientFactory httpClientFactory)
         if (mainFileNode is null)
             return null;
 
-        var fileLocation = mainFileNode["URL"]!.ToString();
-        var fileName = new Uri(fileLocation).Segments.LastOrDefault("file");
+        var fileLocation = mainFileNode["URL"]?.ToString();
+        if (string.IsNullOrWhiteSpace(fileLocation) || !Uri.TryCreate(fileLocation, UriKind.Absolute, out var fileUri) ||
+            (fileUri.Scheme != Uri.UriSchemeHttps && fileUri.Scheme != Uri.UriSchemeHttp))
+            return null;
+
+        var fileName = fileUri.Segments.LastOrDefault("file");
         var fileSize = mainFileNode["Size"]!.ToString();
         var fileCrc = mainFileNode["SHA256"]?.ToString();
         var releaseDateUnix = long.Parse(mainFileNode["Date"]!["Unix"]!.ToString());
@@ -91,7 +95,8 @@ public class PCSupportPackageDownloader(HttpClientFactory httpClientFactory)
 
         var readme = readmeFileNode?["URL"]?.ToString();
 
-        var (isUpdate, reboot) = detector?.Detect(category, title, version, releaseDate) ?? (false, RebootType.NotRequired);
+        var isUtility = PCSupportPackageUpdateDetector.IsUtilityCategory(category, title);
+        var (isUpdate, reboot, installedVersion) = detector?.Detect(category, title, version, releaseDate) ?? (false, RebootType.NotRequired, null);
 
         return new()
         {
@@ -108,6 +113,9 @@ public class PCSupportPackageDownloader(HttpClientFactory httpClientFactory)
             FileLocation = fileLocation,
             IsUpdate = isUpdate,
             Reboot = reboot,
+            InstalledVersion = installedVersion,
+            SourceName = "Lenovo PC Support",
+            IsUtilityOrTool = isUtility
         };
     }
 

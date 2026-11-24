@@ -13,7 +13,7 @@ if (-not (Test-Path $backup)) {
     Copy-Item -Path $target -Destination $backup -Recurse -Force
 }
 
-Write-Host "Copying optimized ReadyToRun v2.38.1.0 build to $target..."
+Write-Host "Copying optimized ReadyToRun v2.38.3.0 build to $target..."
 Copy-Item -Path "$source\*" -Destination $target -Recurse -Force
 
 # Disable UpdateChecker overwriting custom fork unless manually triggered
@@ -24,4 +24,4 @@ if (Test-Path $updateCfgPath) {
 
 Write-Host "Starting Lenovo Legion Toolkit..."
 Start-Process -FilePath "$target\Lenovo Legion Toolkit.exe"
-Write-Host "Done! Optimized Lenovo Legion Toolkit v2.38.1.0 is now live."
+Write-Host "Done! Optimized Lenovo Legion Toolkit v2.38.3.0 is now live."

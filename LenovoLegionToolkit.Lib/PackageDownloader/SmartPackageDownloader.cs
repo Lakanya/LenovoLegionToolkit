@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using LenovoLegionToolkit.Lib.PackageDownloader.Detectors;
 using LenovoLegionToolkit.Lib.Utils;
 
 namespace LenovoLegionToolkit.Lib.PackageDownloader;
@@ -37,8 +38,13 @@ public class SmartPackageDownloader(
         var merged = new List<Package>();
         var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        var hasUpstreamNvidia = nvidiaPackage is not null;
+
         foreach (var pcPkg in pcSupportPackages)
         {
+            if (hasUpstreamNvidia && IsOemNvidiaDriver(pcPkg))
+                continue;
+
             seenFiles.Add(pcPkg.FileName);
 
             if (vantageByFile.TryGetValue(pcPkg.FileName, out var vPkg))
@@ -58,7 +64,10 @@ public class SmartPackageDownloader(
                     FileLocation = pcPkg.FileLocation,
                     IsUpdate = vPkg.IsUpdate || pcPkg.IsUpdate,
                     Reboot = vPkg.Reboot != RebootType.NotRequired ? vPkg.Reboot : pcPkg.Reboot,
-                    InstallCommand = vPkg.InstallCommand
+                    InstallCommand = vPkg.InstallCommand,
+                    InstalledVersion = pcPkg.InstalledVersion,
+                    SourceName = pcPkg.SourceName ?? "Lenovo PC Support",
+                    IsUtilityOrTool = pcPkg.IsUtilityOrTool
                 });
             }
             else
@@ -74,6 +83,14 @@ public class SmartPackageDownloader(
             if (seenFiles.Contains(vPkg.FileName))
                 continue;
 
+            if (hasUpstreamNvidia && IsOemNvidiaDriver(vPkg))
+                continue;
+
+            if (string.IsNullOrWhiteSpace(vPkg.FileLocation) ||
+                !Uri.TryCreate(vPkg.FileLocation, UriKind.Absolute, out var vUri) ||
+                (vUri.Scheme != Uri.UriSchemeHttps && vUri.Scheme != Uri.UriSchemeHttp))
+                continue;
+
             // Drop stale Vantage BIOS entry when PCSupport already provides the newer BIOS package
             if (hasNewerBiosInMerged && vPkg.Category.Contains("BIOS", StringComparison.OrdinalIgnoreCase))
             {
@@ -85,7 +102,26 @@ public class SmartPackageDownloader(
             }
 
             seenFiles.Add(vPkg.FileName);
-            merged.Add(vPkg);
+            merged.Add(new Package
+            {
+                Id = vPkg.Id,
+                Title = vPkg.Title,
+                Description = vPkg.Description,
+                Version = vPkg.Version,
+                Category = vPkg.Category,
+                FileName = vPkg.FileName,
+                FileSize = vPkg.FileSize,
+                FileCrc = vPkg.FileCrc,
+                ReleaseDate = vPkg.ReleaseDate,
+                Readme = vPkg.Readme,
+                FileLocation = vPkg.FileLocation,
+                IsUpdate = vPkg.IsUpdate,
+                Reboot = vPkg.Reboot,
+                InstallCommand = vPkg.InstallCommand,
+                InstalledVersion = vPkg.InstalledVersion,
+                SourceName = "Lenovo Vantage",
+                IsUtilityOrTool = PCSupportPackageUpdateDetector.IsUtilityCategory(vPkg.Category, vPkg.Title)
+            });
         }
 
         if (nvidiaPackage is { } nvPkg)
@@ -94,6 +130,15 @@ public class SmartPackageDownloader(
         progress?.Report(100);
         return merged;
     }
+
+    private static bool IsOemNvidiaDriver(Package pkg) =>
+        !pkg.IsNvidiaUpstream &&
+        !pkg.IsBiosUpdate &&
+        (pkg.Title.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) &&
+         (pkg.Title.Contains("VGA", StringComparison.OrdinalIgnoreCase) ||
+          pkg.Title.Contains("Graphics", StringComparison.OrdinalIgnoreCase) ||
+          pkg.Title.Contains("Display", StringComparison.OrdinalIgnoreCase) ||
+          pkg.Category.Contains("Display", StringComparison.OrdinalIgnoreCase)));
 
     private static async Task<Package?> SafeGetSingleAsync(Func<Task<Package?>> getter)
     {

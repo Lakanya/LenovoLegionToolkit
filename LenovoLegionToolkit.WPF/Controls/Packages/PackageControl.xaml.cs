@@ -7,12 +7,15 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using LenovoLegionToolkit.Lib;
 using LenovoLegionToolkit.Lib.PackageDownloader;
 using LenovoLegionToolkit.Lib.Utils;
 using LenovoLegionToolkit.WPF.Extensions;
 using LenovoLegionToolkit.WPF.Resources;
 using LenovoLegionToolkit.WPF.Utils;
+using Wpf.Ui.Common;
+using Clipboard = System.Windows.Clipboard;
 
 namespace LenovoLegionToolkit.WPF.Controls.Packages;
 
@@ -38,17 +41,70 @@ public partial class PackageControl : IProgress<float>
 
         Unloaded += PackageControl_Unloaded;
 
-        _dateTextBlock.Text = package.ReleaseDate.ToString(LocalizationHelper.ShortDateFormat);
         _titleTextBlock.Text = package.Title;
+
+        var sourceLabel = string.IsNullOrWhiteSpace(package.SourceName) ? "Lenovo" : package.SourceName;
+        _categorySourceTextBlock.Text = $"{package.Category}  ·  {sourceLabel}";
+
+        // DriversCloud-style Installed -> Available version comparison
+        if (!string.IsNullOrWhiteSpace(package.InstalledVersion))
+        {
+            _installedVersionLabel.Text = $"Installed: {package.InstalledVersion}";
+            _installedVersionLabel.Visibility = Visibility.Visible;
+            _versionArrowText.Visibility = Visibility.Visible;
+            _availableVersionLabel.Text = $"Available: {package.Version}";
+            if (package.IsUpdate)
+                _availableVersionLabel.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorSuccessBrush");
+        }
+        else
+        {
+            _availableVersionLabel.Text = $"Version: {package.Version}";
+        }
+
         _descriptionTextBlock.Text = package.Description;
         _descriptionTextBlock.Visibility = string.IsNullOrWhiteSpace(package.Description) ? Visibility.Collapsed : Visibility.Visible;
-        _categoryTextBlock.Text = package.Category;
-        _detailTextBlock.Text = $"{Resource.PackageControl_Version} {package.Version}  |  {package.FileSize}  |  {package.FileName}";
+
+        var dateStr = package.ReleaseDate.ToString(LocalizationHelper.ShortDateFormat);
+        var sizeStr = string.IsNullOrWhiteSpace(package.FileSize) ? string.Empty : $"  ·  {package.FileSize}";
+        _metaTextBlock.Text = $"{dateStr}{sizeStr}  ·  {package.FileName}";
 
         _readmeButton.Visibility = package.Readme is null ? Visibility.Collapsed : Visibility.Visible;
-        _updateRebootStackPanel.Visibility = _isUpdateStackPanel.Visibility = package.IsUpdate ? Visibility.Visible : Visibility.Collapsed;
 
-        _rebootStackPanel.Visibility = package is { IsUpdate: true, Reboot: RebootType.Delayed or RebootType.Requested or RebootType.Forced or RebootType.ForcedPowerOff }
+        // Status badge styling
+        if (package.IsUpdate)
+        {
+            _statusBadge.Visibility = Visibility.Visible;
+            _statusIcon.Symbol = package.IsBiosUpdate ? SymbolRegular.DeveloperBoard24 : SymbolRegular.ArrowSync24;
+            _statusTextBlock.Text = package.IsBiosUpdate ? "BIOS Update Available" : "Update Available";
+            _statusBadge.SetResourceReference(Border.BackgroundProperty, "SystemFillColorSuccessBackgroundBrush");
+            _statusIcon.SetResourceReference(Control.ForegroundProperty, "SystemFillColorSuccessBrush");
+            _statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorSuccessBrush");
+        }
+        else if (!package.IsUtilityOrTool && !string.IsNullOrWhiteSpace(package.InstalledVersion))
+        {
+            _statusBadge.Visibility = Visibility.Visible;
+            _statusIcon.Symbol = SymbolRegular.CheckmarkCircle24;
+            _statusTextBlock.Text = "Up to Date";
+            _statusBadge.SetResourceReference(Border.BackgroundProperty, "ControlFillColorSecondaryBrush");
+            _statusIcon.SetResourceReference(Control.ForegroundProperty, "TextFillColorSecondaryBrush");
+            _statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+        }
+        else if (package.IsUtilityOrTool)
+        {
+            _statusBadge.Visibility = Visibility.Visible;
+            _statusIcon.Symbol = SymbolRegular.Toolbox24;
+            _statusTextBlock.Text = "Utility / Tool";
+            _statusBadge.SetResourceReference(Border.BackgroundProperty, "ControlFillColorSecondaryBrush");
+            _statusIcon.SetResourceReference(Control.ForegroundProperty, "TextFillColorSecondaryBrush");
+            _statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+        }
+        else
+        {
+            _statusBadge.Visibility = Visibility.Collapsed;
+        }
+
+        // Reboot badge
+        _rebootBadge.Visibility = package is { IsUpdate: true, Reboot: RebootType.Delayed or RebootType.Requested or RebootType.Forced or RebootType.ForcedPowerOff }
             ? Visibility.Visible
             : Visibility.Collapsed;
         _rebootTextBlock.Text = package.Reboot switch
@@ -59,12 +115,27 @@ public partial class PackageControl : IProgress<float>
             _ => string.Empty
         };
 
-        var showWarning = package.ReleaseDate < DateTime.UtcNow.AddYears(-1);
-        _warningTextBlock.Visibility = showWarning ? Visibility.Visible : Visibility.Collapsed;
-
+        // Primary action button clarity
         if (package.IsNvidiaUpstream)
         {
-            _installButton.ToolTip = "Open in NVCleanstall (debloated install)";
+            _installButton.Content = "NVCleanstall";
+            _installButton.Icon = SymbolRegular.Wrench24;
+            _installButton.Appearance = package.IsUpdate ? ControlAppearance.Primary : ControlAppearance.Secondary;
+            _installButton.ToolTip = "Open NVCleanstall for a clean, debloated NVIDIA driver install";
+        }
+        else if (package.IsBiosUpdate)
+        {
+            _installButton.Content = package.IsUpdate ? "Flash BIOS" : "Re-flash BIOS";
+            _installButton.Icon = SymbolRegular.DeveloperBoard24;
+            _installButton.Appearance = package.IsUpdate ? ControlAppearance.Primary : ControlAppearance.Secondary;
+            _installButton.ToolTip = "Download and launch Lenovo's official BIOS updater";
+        }
+        else
+        {
+            _installButton.Content = package.IsUpdate ? "Update" : "Install";
+            _installButton.Icon = SymbolRegular.Play24;
+            _installButton.Appearance = package.IsUpdate ? ControlAppearance.Primary : ControlAppearance.Secondary;
+            _installButton.ToolTip = "Download and install automatically";
         }
     }
 

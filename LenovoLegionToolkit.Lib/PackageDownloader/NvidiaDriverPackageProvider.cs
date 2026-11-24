@@ -61,11 +61,9 @@ public class NvidiaDriverPackageProvider(HttpClientFactory httpClientFactory)
         var latestVersion = ParseSimpleVersion(latestVersionText);
         var isUpdate = installedVersion is not null && latestVersion is not null && latestVersion > installedVersion;
 
-        var description = installedVersionText is not null
-            ? isUpdate
-                ? $"Installed: {installedVersionText}  ->  Latest WHQL: {latestVersionText}. Click Play to open NVCleanstall for a clean, debloated install."
-                : $"Up to date (Installed: {installedVersionText}, Latest WHQL: {latestVersionText}). Click Play to open NVCleanstall."
-            : $"Latest WHQL: {latestVersionText}. Click Play to open NVCleanstall for a clean, debloated install.";
+        var description = isUpdate
+            ? "Newer official Game Ready WHQL release available. Open NVCleanstall for a clean, debloated install."
+            : "Your NVIDIA GeForce driver is up to date. You can still open NVCleanstall anytime to reinstall or tweak components.";
 
         var fileName = Path.GetFileName(new Uri(downloadUrl).AbsolutePath);
 
@@ -75,7 +73,7 @@ public class NvidiaDriverPackageProvider(HttpClientFactory httpClientFactory)
             Title = $"NVIDIA GeForce Game Ready Driver ({gpuName})",
             Description = description,
             Version = latestVersionText,
-            Category = "GPU Driver (NVIDIA / NVCleanstall)",
+            Category = "Display & GPU",
             FileName = fileName,
             FileSize = fileSize,
             ReleaseDate = releaseDate,
@@ -83,7 +81,10 @@ public class NvidiaDriverPackageProvider(HttpClientFactory httpClientFactory)
             FileLocation = downloadUrl,
             IsUpdate = isUpdate,
             Reboot = RebootType.NotRequired,
-            IsNvidiaUpstream = true
+            IsNvidiaUpstream = true,
+            InstalledVersion = installedVersionText,
+            SourceName = "NVIDIA Official (NVCleanstall)",
+            IsUtilityOrTool = false
         };
     }
 

@@ -29,6 +29,13 @@ namespace LenovoLegionToolkit.WPF.Pages;
 
 public partial class PackagesPage : IProgress<float>
 {
+    private enum FilterTab
+    {
+        Updates,
+        Drivers,
+        Tools
+    }
+
     public static bool OpenUpdatesOnly { get; set; }
 
     private readonly PackageDownloaderSettings _packageDownloaderSettings = IoCContainer.Resolve<PackageDownloaderSettings>();
@@ -36,12 +43,13 @@ public partial class PackagesPage : IProgress<float>
     private readonly DriverUpdateChecker _driverUpdateChecker = IoCContainer.Resolve<DriverUpdateChecker>();
 
     private IPackageDownloader? _packageDownloader;
-
     private CancellationTokenSource? _getPackagesTokenSource;
-
     private CancellationTokenSource? _filterDebounceCancellationTokenSource;
 
     private List<Package>? _packages;
+    private MachineInformation _machineInfo;
+    private FilterTab _activeTab = FilterTab.Updates;
+    private bool _hasAutoScanned;
 
     public PackagesPage()
     {
@@ -53,7 +61,8 @@ public partial class PackagesPage : IProgress<float>
 
     private async void PackagesPage_Initialized(object? sender, EventArgs e)
     {
-        _machineTypeTextBox.Text = (await Compatibility.GetMachineInformationAsync()).MachineType;
+        _machineInfo = await Compatibility.GetMachineInformationAsync();
+        _machineTypeTextBox.Text = _machineInfo.MachineType;
         _osComboBox.SetItems(Enum.GetValues<OS>(), OSExtensions.GetCurrent(), os => os.GetDisplayName());
 
         var downloadsFolder = KnownFolders.GetPath(KnownFolder.Downloads);
@@ -71,32 +80,44 @@ public partial class PackagesPage : IProgress<float>
 
         if (_driverUpdateChecker.CachedPackages is { Count: > 0 } cached)
         {
+            _hasAutoScanned = true;
             _packageDownloader = _packageDownloaderFactory.GetInstance(PackageDownloaderFactory.Type.Smart);
             _packages = cached.ToList();
-            _onlyShowUpdatesCheckBox.Visibility = Visibility.Visible;
-            _onlyShowUpdatesCheckBox.IsChecked = OpenUpdatesOnly || _packageDownloaderSettings.Store.OnlyShowUpdates;
+
+            var hasUpdates = _packages.Any(p => p.IsUpdate && !p.IsUtilityOrTool && !_packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id));
+            _activeTab = OpenUpdatesOnly || hasUpdates ? FilterTab.Updates : FilterTab.Drivers;
+            OpenUpdatesOnly = false;
+
             _loader.Visibility = Visibility.Visible;
             _loader.IsLoading = false;
             Reload();
         }
+        else
+        {
+            UpdateHeroSummary();
+        }
     }
 
-    private void PackagesPage_Loaded(object sender, RoutedEventArgs e)
+    private async void PackagesPage_Loaded(object sender, RoutedEventArgs e)
     {
-        if (!OpenUpdatesOnly)
-            return;
-
-        OpenUpdatesOnly = false;
-        if (_driverUpdateChecker.CachedPackages is { Count: > 0 } cached)
+        if (OpenUpdatesOnly && _driverUpdateChecker.CachedPackages is { Count: > 0 } cached)
         {
+            OpenUpdatesOnly = false;
             _sourceSmartRadio.IsChecked = true;
             _packageDownloader = _packageDownloaderFactory.GetInstance(PackageDownloaderFactory.Type.Smart);
             _packages = cached.ToList();
-            _onlyShowUpdatesCheckBox.Visibility = Visibility.Visible;
-            _onlyShowUpdatesCheckBox.IsChecked = true;
+            _activeTab = FilterTab.Updates;
             _loader.Visibility = Visibility.Visible;
             _loader.IsLoading = false;
             Reload();
+            return;
+        }
+
+        // Automatically scan on first open if background cache isn't populated yet
+        if (!_hasAutoScanned && _packages is null)
+        {
+            _hasAutoScanned = true;
+            await ScanPackagesAsync();
         }
     }
 
@@ -105,6 +126,32 @@ public partial class PackagesPage : IProgress<float>
         _loader.IsIndeterminate = value < 0;
         _loader.Progress = value;
     });
+
+    private void AdvancedOptionsToggleButton_Click(object sender, RoutedEventArgs e)
+    {
+        _advancedOptionsCard.Visibility = _advancedOptionsCard.Visibility == Visibility.Visible
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private async void FilterTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (!await ShouldInterruptDownloadsIfRunning())
+            return;
+
+        if (sender is not Wpf.Ui.Controls.Button btn || btn.Tag is not string tag)
+            return;
+
+        _activeTab = tag switch
+        {
+            "updates" => FilterTab.Updates,
+            "tools" => FilterTab.Tools,
+            _ => FilterTab.Drivers
+        };
+
+        _scrollViewer.ScrollToHome();
+        Reload();
+    }
 
     private void DownloadToText_OnTextChanged(object sender, TextChangedEventArgs e)
     {
@@ -122,7 +169,6 @@ public partial class PackagesPage : IProgress<float>
         try
         {
             var location = GetDownloadLocation();
-
             if (!Directory.Exists(location))
                 return;
 
@@ -150,6 +196,11 @@ public partial class PackagesPage : IProgress<float>
 
     private async void DownloadPackagesButton_Click(object sender, RoutedEventArgs e)
     {
+        await ScanPackagesAsync();
+    }
+
+    private async Task ScanPackagesAsync()
+    {
         if (!await ShouldInterruptDownloadsIfRunning())
             return;
 
@@ -158,6 +209,8 @@ public partial class PackagesPage : IProgress<float>
         {
             _downloadPackagesButton.Visibility = Visibility.Collapsed;
             _cancelDownloadPackagesButton.Visibility = Visibility.Visible;
+            _installAllUpdatesButton.Visibility = Visibility.Collapsed;
+            _heroStatusTitle.Text = "Scanning drivers & firmware...";
             _loader.Visibility = Visibility.Visible;
             _loader.IsLoading = true;
             _packages = null;
@@ -165,16 +218,11 @@ public partial class PackagesPage : IProgress<float>
             _packagesStackPanel.Children.Clear();
             _scrollViewer.ScrollToHome();
 
-            _filterTextBox.Text = string.Empty;
-            _sortingComboBox.SelectedIndex = 2;
-
             var machineType = _machineTypeTextBox.Text.Trim();
-
             if (string.IsNullOrWhiteSpace(machineType) || machineType.Length != 4 ||
                 !_osComboBox.TryGetSelectedItem(out OS os))
             {
-                await SnackbarHelper.ShowAsync(Resource.PackagesPage_DownloadFailed_Title,
-                    Resource.PackagesPage_DownloadFailed_Message);
+                await SnackbarHelper.ShowAsync(Resource.PackagesPage_DownloadFailed_Title, Resource.PackagesPage_DownloadFailed_Message);
                 return;
             }
 
@@ -182,16 +230,12 @@ public partial class PackagesPage : IProgress<float>
                 await _getPackagesTokenSource.CancelAsync();
 
             _getPackagesTokenSource = new();
-
             var token = _getPackagesTokenSource.Token;
 
             var packageDownloaderType = new[] { _sourceSmartRadio, _sourcePrimaryRadio, _sourceSecondaryRadio }
                 .Where(r => r.IsChecked == true)
                 .Select(r => (PackageDownloaderFactory.Type)r.Tag)
                 .First();
-
-            _onlyShowUpdatesCheckBox.Visibility = Visibility.Visible;
-            _onlyShowUpdatesCheckBox.IsChecked = _packageDownloaderSettings.Store.OnlyShowUpdates;
 
             _packageDownloader = _packageDownloaderFactory.GetInstance(packageDownloaderType);
             var packages = await _packageDownloader.GetPackagesAsync(machineType, os, this, token);
@@ -200,14 +244,15 @@ public partial class PackagesPage : IProgress<float>
             if (packageDownloaderType == PackageDownloaderFactory.Type.Smart)
                 _driverUpdateChecker.UpdateCache(packages);
 
+            var hasUpdates = packages.Any(p => p.IsUpdate && !p.IsUtilityOrTool && !_packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id));
+            _activeTab = hasUpdates ? FilterTab.Updates : FilterTab.Drivers;
+
             Reload();
         }
         catch (UpdateCatalogNotFoundException ex)
         {
             Log.Instance.Trace($"Update catalog not found.", ex);
-
             await SnackbarHelper.ShowAsync(Resource.PackagesPage_UpdateCatalogNotFound_Title, Resource.PackagesPage_UpdateCatalogNotFound_Message, SnackbarType.Info);
-
             errorOccurred = true;
         }
         catch (OperationCanceledException)
@@ -217,17 +262,13 @@ public partial class PackagesPage : IProgress<float>
         catch (HttpRequestException ex)
         {
             Log.Instance.Trace($"Error occurred when downloading packages.", ex);
-
             await SnackbarHelper.ShowAsync(Resource.PackagesPage_Error_Title, Resource.PackagesPage_Error_CheckInternet_Message, SnackbarType.Error);
-
             errorOccurred = true;
         }
         catch (Exception ex)
         {
             Log.Instance.Trace($"Error occurred when downloading packages.", ex);
-
             await SnackbarHelper.ShowAsync(Resource.PackagesPage_Error_Title, ex.Message, SnackbarType.Error);
-
             errorOccurred = true;
         }
         finally
@@ -241,8 +282,7 @@ public partial class PackagesPage : IProgress<float>
             if (errorOccurred)
             {
                 _packagesStackPanel.Children.Clear();
-                _loader.Visibility = Visibility.Collapsed;
-                _loader.IsLoading = true;
+                UpdateHeroSummary();
             }
         }
     }
@@ -264,31 +304,12 @@ public partial class PackagesPage : IProgress<float>
 
             _filterDebounceCancellationTokenSource = new();
 
-            await Task.Delay(500, _filterDebounceCancellationTokenSource.Token);
+            await Task.Delay(300, _filterDebounceCancellationTokenSource.Token);
 
-            _packagesStackPanel.Children.Clear();
             _scrollViewer.ScrollToHome();
-
             Reload();
         }
         catch (OperationCanceledException) { }
-    }
-
-    private async void OnlyShowUpdatesCheckBox_OnChecked(object sender, RoutedEventArgs e)
-    {
-        if (!await ShouldInterruptDownloadsIfRunning())
-            return;
-
-        if (_packages is null)
-            return;
-
-        _packageDownloaderSettings.Store.OnlyShowUpdates = _onlyShowUpdatesCheckBox.IsChecked ?? false;
-        _packageDownloaderSettings.SynchronizeStore();
-
-        _packagesStackPanel.Children.Clear();
-        _scrollViewer.ScrollToHome();
-
-        Reload();
     }
 
     private async void SortingComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -299,9 +320,7 @@ public partial class PackagesPage : IProgress<float>
         if (_packages is null)
             return;
 
-        _packagesStackPanel.Children.Clear();
         _scrollViewer.ScrollToHome();
-
         Reload();
     }
 
@@ -335,7 +354,6 @@ public partial class PackagesPage : IProgress<float>
         {
             _packageDownloaderSettings.Store.HiddenPackages.Add(package.Id);
             _packageDownloaderSettings.SynchronizeStore();
-
             Reload();
         };
 
@@ -349,7 +367,6 @@ public partial class PackagesPage : IProgress<float>
             foreach (var id in packages.Select(p => p.Id))
                 _packageDownloaderSettings.Store.HiddenPackages.Add(id);
             _packageDownloaderSettings.SynchronizeStore();
-
             Reload();
         };
 
@@ -370,23 +387,88 @@ public partial class PackagesPage : IProgress<float>
         return await MessageBoxHelper.ShowAsync(this, Resource.PackagesPage_DownloadInProgress_Title, Resource.PackagesPage_DownloadInProgress_Message);
     }
 
+    private void UpdateHeroSummary()
+    {
+        var biosLabel = !string.IsNullOrWhiteSpace(_machineInfo.BiosVersionRaw) ? $"BIOS {_machineInfo.BiosVersionRaw}" : "BIOS";
+        var lastCheckLabel = _driverUpdateChecker.LastCheckUtc == DateTime.MinValue
+            ? "Not scanned yet"
+            : FormatLastChecked(_driverUpdateChecker.LastCheckUtc);
+
+        _heroMachineSubtitle.Text = $"{_machineInfo.Model}  ·  {_machineInfo.MachineType}  ·  {OSExtensions.GetCurrent().GetDisplayName()}  ·  {biosLabel}  ·  Last scan: {lastCheckLabel}";
+
+        if (_packages is null)
+        {
+            _heroStatusTitle.Text = "Ready to scan drivers & firmware";
+            _heroIcon.Symbol = SymbolRegular.ArrowSync24;
+            return;
+        }
+
+        var visible = _packages.Where(p => !_packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id)).ToList();
+        var updates = visible.Where(p => p.IsUpdate && !p.IsUtilityOrTool).ToList();
+        var silentDriverUpdates = updates.Where(p => !p.IsBiosUpdate && !p.IsNvidiaUpstream).ToList();
+        var driversCount = visible.Count(p => !p.IsUtilityOrTool);
+        var toolsCount = visible.Count(p => p.IsUtilityOrTool);
+
+        _tabUpdatesButton.Content = $"Updates ({updates.Count})";
+        _tabDriversButton.Content = $"All Drivers ({driversCount})";
+        _tabToolsButton.Content = $"Tools & Utilities ({toolsCount})";
+
+        _tabUpdatesButton.Appearance = _activeTab == FilterTab.Updates ? ControlAppearance.Primary : ControlAppearance.Secondary;
+        _tabDriversButton.Appearance = _activeTab == FilterTab.Drivers ? ControlAppearance.Primary : ControlAppearance.Secondary;
+        _tabToolsButton.Appearance = _activeTab == FilterTab.Tools ? ControlAppearance.Primary : ControlAppearance.Secondary;
+
+        if (updates.Count > 0)
+        {
+            var parts = new List<string>();
+            var biosCount = updates.Count(p => p.IsBiosUpdate);
+            var nvCount = updates.Count(p => p.IsNvidiaUpstream);
+            if (biosCount > 0) parts.Add($"{biosCount} BIOS");
+            if (nvCount > 0) parts.Add($"{nvCount} NVIDIA");
+            if (silentDriverUpdates.Count > 0) parts.Add($"{silentDriverUpdates.Count} driver");
+
+            _heroStatusTitle.Text = updates.Count == 1
+                ? $"1 update available ({string.Join(", ", parts)})"
+                : $"{updates.Count} updates available ({string.Join(", ", parts)})";
+
+            _heroIcon.Symbol = SymbolRegular.ArrowDownload24;
+            _heroIconBorder.SetResourceReference(Border.BackgroundProperty, "SystemFillColorCautionBackgroundBrush");
+            _heroIcon.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "SystemFillColorCautionBrush");
+        }
+        else
+        {
+            _heroStatusTitle.Text = "All drivers & firmware are up to date";
+            _heroIcon.Symbol = SymbolRegular.CheckmarkCircle24;
+            _heroIconBorder.SetResourceReference(Border.BackgroundProperty, "SystemFillColorSuccessBackgroundBrush");
+            _heroIcon.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "SystemFillColorSuccessBrush");
+        }
+
+        _installAllUpdatesButton.Visibility = silentDriverUpdates.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _installAllUpdatesButton.Content = silentDriverUpdates.Count > 1
+            ? $"Update All ({silentDriverUpdates.Count})"
+            : "Update 1 Driver";
+    }
+
+    private static string FormatLastChecked(DateTime utcTime)
+    {
+        var diff = DateTime.UtcNow - utcTime;
+        if (diff.TotalMinutes < 1) return "just now";
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+        return utcTime.ToLocalTime().ToString("g");
+    }
+
     private void Reload()
     {
         if (_packageDownloader is null)
             return;
 
         _packagesStackPanel.Children.Clear();
+        UpdateHeroSummary();
 
         if (_packages is null || _packages.Count == 0)
             return;
 
         var packages = SortAndFilter(_packages);
-
-        var driverUpdateCount = _packages.Count(p => p.IsUpdate && !p.IsBiosUpdate && !p.IsNvidiaUpstream && !_packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id));
-        _installAllUpdatesButton.Visibility = driverUpdateCount > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _installAllUpdatesButton.Content = driverUpdateCount > 1
-            ? $"Install {driverUpdateCount} driver updates"
-            : "Install 1 driver update";
 
         foreach (var package in packages)
         {
@@ -399,15 +481,61 @@ public partial class PackagesPage : IProgress<float>
 
         if (packages.IsEmpty())
         {
-            var tb = new TextBlock
+            var emptyPanel = new StackPanel
             {
-                Text = Resource.PackagesPage_NoMatchingDownloads,
-                Foreground = (SolidColorBrush)FindResource("TextFillColorSecondaryBrush"),
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new(0, 32, 0, 32),
-                Focusable = true
+                Margin = new(0, 36, 0, 36)
             };
-            _packagesStackPanel.Children.Add(tb);
+
+            if (_activeTab == FilterTab.Updates && string.IsNullOrWhiteSpace(_filterTextBox.Text))
+            {
+                emptyPanel.Children.Add(new SymbolIcon
+                {
+                    Symbol = SymbolRegular.CheckmarkCircle24,
+                    FontSize = 36,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Foreground = (Brush)FindResource("SystemFillColorSuccessBrush")
+                });
+                emptyPanel.Children.Add(new TextBlock
+                {
+                    Text = "Everything is up to date!",
+                    FontSize = 16,
+                    FontWeight = FontWeights.SemiBold,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new(0, 10, 0, 4)
+                });
+                emptyPanel.Children.Add(new TextBlock
+                {
+                    Text = "Your installed drivers and BIOS match the latest official releases.",
+                    Foreground = (Brush)FindResource("TextFillColorSecondaryBrush"),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new(0, 0, 0, 14)
+                });
+
+                var viewAllBtn = new Wpf.Ui.Controls.Button
+                {
+                    Content = "View All Drivers",
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+                viewAllBtn.Click += (_, _) =>
+                {
+                    _activeTab = FilterTab.Drivers;
+                    Reload();
+                };
+                emptyPanel.Children.Add(viewAllBtn);
+            }
+            else
+            {
+                emptyPanel.Children.Add(new TextBlock
+                {
+                    Text = Resource.PackagesPage_NoMatchingDownloads,
+                    Foreground = (Brush)FindResource("TextFillColorSecondaryBrush"),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Focusable = true
+                });
+            }
+
+            _packagesStackPanel.Children.Add(emptyPanel);
         }
 
         if (_packageDownloaderSettings.Store.HiddenPackages.Count != 0)
@@ -415,14 +543,13 @@ public partial class PackagesPage : IProgress<float>
             var clearHidden = new Hyperlink
             {
                 Icon = SymbolRegular.Eye24,
-                Content = "Show hidden downloads",
+                Content = $"Show {_packageDownloaderSettings.Store.HiddenPackages.Count} hidden package(s)",
                 HorizontalAlignment = HorizontalAlignment.Right,
             };
             clearHidden.Click += (_, _) =>
             {
                 _packageDownloaderSettings.Store.HiddenPackages.Clear();
                 _packageDownloaderSettings.SynchronizeStore();
-
                 Reload();
             };
             _packagesStackPanel.Children.Add(clearHidden);
@@ -431,9 +558,18 @@ public partial class PackagesPage : IProgress<float>
 
     private async void InstallAllUpdatesButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_packages is null || _packageDownloader is null)
+            return;
+
+        if (_activeTab != FilterTab.Updates)
+        {
+            _activeTab = FilterTab.Updates;
+            Reload();
+        }
+
         var controls = _packagesStackPanel.Children
             .OfType<PackageControl>()
-            .Where(c => c.Package.IsUpdate && !c.Package.IsBiosUpdate && !c.Package.IsNvidiaUpstream)
+            .Where(c => c.Package.IsUpdate && !c.Package.IsBiosUpdate && !c.Package.IsNvidiaUpstream && !c.Package.IsUtilityOrTool)
             .ToArray();
 
         if (controls.Length == 0)
@@ -471,21 +607,30 @@ public partial class PackagesPage : IProgress<float>
 
     private List<Package> SortAndFilter(List<Package> packages)
     {
-        var result = _sortingComboBox.SelectedIndex switch
+        IEnumerable<Package> result = packages
+            .Where(p => !_packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id));
+
+        result = _activeTab switch
         {
-            0 => packages.OrderBy(p => p.Title),
-            1 => packages.OrderBy(p => p.Category),
-            2 => packages.OrderByDescending(p => p.ReleaseDate),
-            _ => packages.AsEnumerable(),
+            FilterTab.Updates => result.Where(p => p.IsUpdate && !p.IsUtilityOrTool),
+            FilterTab.Tools => result.Where(p => p.IsUtilityOrTool),
+            _ => result.Where(p => !p.IsUtilityOrTool)
         };
-
-        result = result.Where(p => !_packageDownloaderSettings.Store.HiddenPackages.Contains(p.Id));
-
-        if (_onlyShowUpdatesCheckBox.IsChecked ?? false)
-            result = result.Where(p => p.IsUpdate);
 
         if (!string.IsNullOrWhiteSpace(_filterTextBox.Text))
             result = result.Where(p => p.Index.Contains(_filterTextBox.Text, StringComparison.InvariantCultureIgnoreCase));
+
+        result = _sortingComboBox.SelectedIndex switch
+        {
+            1 => result.OrderByDescending(p => p.ReleaseDate),
+            2 => result.OrderBy(p => p.Title),
+            3 => result.OrderBy(p => p.Category).ThenByDescending(p => p.IsUpdate),
+            _ => result
+                .OrderByDescending(p => p.IsUpdate)
+                .ThenByDescending(p => p.IsBiosUpdate)
+                .ThenByDescending(p => p.IsNvidiaUpstream)
+                .ThenByDescending(p => p.ReleaseDate)
+        };
 
         return result.ToList();
     }
