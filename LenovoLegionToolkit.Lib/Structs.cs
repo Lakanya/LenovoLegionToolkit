@@ -1278,10 +1278,15 @@ public readonly struct Update(Release release)
     public DateTimeOffset Date { get; } = release.PublishedAt ?? release.CreatedAt;
 
     public string? Url { get; } = release.Assets
-        .Where(ra => ra.Name.StartsWith("LenovoLegionToolkitSetup", StringComparison.InvariantCultureIgnoreCase) &&
-                     ra.Name.EndsWith(".exe", StringComparison.InvariantCultureIgnoreCase))
+        .Where(ra => (ra.Name.StartsWith("LenovoLegionToolkit", StringComparison.InvariantCultureIgnoreCase) &&
+                      ra.Name.EndsWith(".zip", StringComparison.InvariantCultureIgnoreCase)) ||
+                     (ra.Name.StartsWith("LenovoLegionToolkitSetup", StringComparison.InvariantCultureIgnoreCase) &&
+                      ra.Name.EndsWith(".exe", StringComparison.InvariantCultureIgnoreCase)))
+        .OrderByDescending(ra => ra.Name.EndsWith(".zip", StringComparison.InvariantCultureIgnoreCase))
         .Select(ra => ra.BrowserDownloadUrl)
         .FirstOrDefault();
+
+    public bool IsZipPackage => Url?.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) == true;
 
     #region Equality
 

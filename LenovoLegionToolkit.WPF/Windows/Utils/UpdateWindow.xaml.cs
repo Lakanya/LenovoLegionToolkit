@@ -1,8 +1,11 @@
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
+using System.IO.Compression;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using BlackSharp.Core.Extensions;
@@ -86,7 +89,15 @@ public partial class UpdateWindow : IProgress<float>
 
             _downloadCancellationTokenSource = null;
 
-            Process.Start(path, $"/SILENT /RESTARTAPPLICATIONS /LANG={Resource.Culture.Name.Replace("-", string.Empty)}");
+            if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                await ApplyZipSelfUpdateAsync(path);
+            }
+            else
+            {
+                Process.Start(path, $"/SILENT /RESTARTAPPLICATIONS /LANG={Resource.Culture.Name.Replace("-", string.Empty)}");
+            }
+
             await App.Current.ShutdownAsync();
         }
         catch (OperationCanceledException)
@@ -113,6 +124,38 @@ public partial class UpdateWindow : IProgress<float>
                 Close();
             }
         }
+    }
+
+    private static async Task ApplyZipSelfUpdateAsync(string zipPath)
+    {
+        var stagingDir = Path.Combine(Folders.Temp, $"LLT-SelfUpdate-{Guid.NewGuid():N}");
+        await Task.Run(() => ZipFile.ExtractToDirectory(zipPath, stagingDir, overwriteFiles: true));
+
+        var targetDir = AppContext.BaseDirectory.TrimEnd('\\', '/');
+        var exePath = Environment.ProcessPath ?? Path.Combine(targetDir, "Lenovo Legion Toolkit.exe");
+        var pid = Environment.ProcessId;
+        var scriptPath = Path.Combine(Folders.Temp, $"LLT-ApplyUpdate-{Guid.NewGuid():N}.ps1");
+
+        var script = $$"""
+            $ErrorActionPreference = 'SilentlyContinue'
+            try { Wait-Process -Id {{pid}} -Timeout 15 } catch {}
+            Start-Sleep -Milliseconds 500
+            Copy-Item -Path '{{stagingDir}}\*' -Destination '{{targetDir}}' -Recurse -Force
+            Start-Process -FilePath '{{exePath}}'
+            Remove-Item -Path '{{stagingDir}}' -Recurse -Force
+            Remove-Item -Path '{{zipPath}}' -Force
+            Remove-Item -Path $MyInvocation.MyCommand.Path -Force
+            """;
+
+        await File.WriteAllTextAsync(scriptPath, script, Encoding.UTF8);
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{scriptPath}\"",
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
     }
 
     private void CancelDownloadButton_Click(object sender, RoutedEventArgs e) => _downloadCancellationTokenSource?.Cancel();

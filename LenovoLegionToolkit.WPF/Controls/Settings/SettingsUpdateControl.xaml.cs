@@ -11,6 +11,7 @@ using LenovoLegionToolkit.WPF.Extensions;
 using LenovoLegionToolkit.WPF.Resources;
 using LenovoLegionToolkit.WPF.Utils;
 using LenovoLegionToolkit.WPF.Windows;
+using LenovoLegionToolkit.WPF.Windows.Utils;
 
 namespace LenovoLegionToolkit.WPF.Controls.Settings;
 
@@ -64,8 +65,30 @@ public partial class SettingsUpdateControl
         if (App.Current.MainWindow is not MainWindow mainWindow)
             return;
 
-        mainWindow.CheckForUpdates(true);
-        await SnackbarHelper.ShowAsync(Resource.SettingsPage_CheckUpdates_Started_Title, type: SnackbarType.Info);
+        _checkUpdatesButton.IsEnabled = false;
+        try
+        {
+            var latestVersion = await _updateChecker.CheckAsync(true);
+            mainWindow.CheckForUpdates(false);
+
+            if (latestVersion is not null)
+            {
+                var updateWindow = new UpdateWindow { Owner = mainWindow };
+                updateWindow.ShowDialog();
+            }
+            else if (_updateChecker.Status == UpdateCheckStatus.Success)
+            {
+                await SnackbarHelper.ShowAsync("Up to date", "You are already running the latest custom build.", SnackbarType.Success);
+            }
+            else
+            {
+                await SnackbarHelper.ShowAsync("Update check failed", "Could not reach GitHub releases. Try again later.", SnackbarType.Warning);
+            }
+        }
+        finally
+        {
+            _checkUpdatesButton.IsEnabled = true;
+        }
     }
 
     private void UpdateChannelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

@@ -81,14 +81,14 @@ public class UpdateChecker
             var timeSpanSinceLastUpdate = DateTime.UtcNow - _lastUpdate;
             var shouldCheck = timeSpanSinceLastUpdate > _minimumTimeSpanForRefresh;
 
-            if (_updateSettings.Store.UpdateMethod == UpdateMethod.GitHub)
+            if (_updateSettings.Store.UpdateMethod == UpdateMethod.GitHub || true)
             {
                 try
                 {
                     if (!forceCheck && !shouldCheck)
                         return _updates.Length != 0 ? _updates.First().Version : null;
 
-                    Log.Instance.Trace($"Checking GitHub for updates...");
+                    Log.Instance.Trace($"Checking GitHub (Lakanya/LenovoLegionToolkit) for updates...");
 
                     _updates = [];
 
@@ -96,7 +96,7 @@ public class UpdateChecker
                     var productInformation = new ProductHeaderValue("LenovoLegionToolkit-UpdateChecker");
                     var connection = new Connection(productInformation, adapter);
                     var githubClient = new GitHubClient(connection);
-                    var releases = await githubClient.Repository.Release.GetAll("LenovoLegionToolkit-Team", "LenovoLegionToolkit", new ApiOptions { PageSize = 5 }).ConfigureAwait(false);
+                    var releases = await githubClient.Repository.Release.GetAll("Lakanya", "LenovoLegionToolkit", new ApiOptions { PageSize = 10 }).ConfigureAwait(false);
 
                     var thisReleaseVersion = Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0, 0, 0);
                     var thisBuildDate = Assembly.GetEntryAssembly()?.GetBuildDateTime() ?? new DateTime(2000, 1, 1);
@@ -110,12 +110,12 @@ public class UpdateChecker
 
                     var updates = releases
                         .Where(r => !r.Draft)
-                        .Where(r => IsMatchingChannel(r, updateChannel))
-                        .Where(r => (r.PublishedAt ?? r.CreatedAt).UtcDateTime >= thisBuildDate)
+                        .Where(r => !r.Prerelease || updateChannel != UpdateChannel.Stable)
                         .Select(r => new { Release = r, Version = TryParseReleaseVersion(r.TagName) })
                         .Where(r => r.Version is not null && r.Version > thisReleaseVersion)
                         .OrderByDescending(r => r.Version)
                         .Select(r => new Update(r.Release))
+                        .Where(u => !string.IsNullOrWhiteSpace(u.Url))
                         .ToArray();
 
                     Log.Instance.Trace($"Checked [updates.Length={updates.Length}]");
@@ -225,35 +225,22 @@ public class UpdateChecker
     {
         using (await _updateSemaphore.LockAsync(cancellationToken).ConfigureAwait(false))
         {
-            var tempPath = Path.Combine(Folders.Temp, $"LenovoLegionToolkitSetup_{Guid.NewGuid()}.exe");
+            var latestUpdate = _updates.OrderByDescending(u => u.Version).FirstOrDefault();
 
-            if (_updateSettings.Store.UpdateMethod == UpdateMethod.GitHub)
+            if (latestUpdate.Url is null)
+                throw new InvalidOperationException("No GitHub updates available");
+
+            var ext = latestUpdate.IsZipPackage ? ".zip" : ".exe";
+            var tempPath = Path.Combine(Folders.Temp, $"LenovoLegionToolkitUpdate_{Guid.NewGuid()}{ext}");
+
+            await using (var fileStream = File.OpenWrite(tempPath))
             {
-                var latestUpdate = _updates.OrderByDescending(u => u.Version).FirstOrDefault();
-
-                if (latestUpdate.Url is null)
-                    throw new InvalidOperationException("No GitHub updates available");
-
-                await using var fileStream = File.OpenWrite(tempPath);
                 using var httpClient = _httpClientFactory.Create();
                 await httpClient.DownloadAsync(latestUpdate.Url, fileStream, progress, cancellationToken).ConfigureAwait(false);
             }
-            else
-            {
-                if (UpdateFromServer is not { Url: not null })
-                    throw new InvalidOperationException("Setup file URL could not be found");
 
-                var version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "0.0.0.0";
-
-                using var httpClient = _httpClientFactory.Create();
-
-                {
-                    await using var fileStream = File.OpenWrite(tempPath);
-                    await httpClient.DownloadAsync(UpdateFromServer.Value.Url, fileStream, progress, cancellationToken, version).ConfigureAwait(false);
-                }
-            }
-
-            await Task.Run(() => VerifySignature(tempPath), cancellationToken).ConfigureAwait(false);
+            if (!latestUpdate.IsZipPackage)
+                await Task.Run(() => VerifySignature(tempPath), cancellationToken).ConfigureAwait(false);
 
             return tempPath;
         }
