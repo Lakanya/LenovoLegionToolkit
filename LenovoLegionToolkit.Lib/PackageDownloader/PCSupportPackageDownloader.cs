@@ -96,7 +96,8 @@ public class PCSupportPackageDownloader(HttpClientFactory httpClientFactory)
         var readme = readmeFileNode?["URL"]?.ToString();
 
         var isUtility = PCSupportPackageUpdateDetector.IsUtilityCategory(category, title);
-        var (isUpdate, reboot, installedVersion) = detector?.Detect(category, title, version, releaseDate) ?? (false, RebootType.NotRequired, null);
+        var detection = detector?.Detect(category, title, version, releaseDate)
+                        ?? new PackageDetectionResult(false, RebootType.NotRequired, null, null, null, false);
 
         return new()
         {
@@ -111,9 +112,12 @@ public class PCSupportPackageDownloader(HttpClientFactory httpClientFactory)
             ReleaseDate = releaseDate,
             Readme = readme,
             FileLocation = fileLocation,
-            IsUpdate = isUpdate,
-            Reboot = reboot,
-            InstalledVersion = installedVersion,
+            IsUpdate = detection.IsUpdate,
+            Reboot = detection.Reboot,
+            InstalledVersion = detection.InstalledVersion,
+            InstalledDate = detection.InstalledDate,
+            MatchedAvailableVersion = detection.MatchedAvailableVersion,
+            IsInstalledNewer = detection.IsInstalledNewer,
             SourceName = "Lenovo PC Support",
             IsUtilityOrTool = isUtility
         };

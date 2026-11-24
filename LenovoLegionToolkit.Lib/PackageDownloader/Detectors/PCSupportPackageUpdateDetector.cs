@@ -8,6 +8,14 @@ using LenovoLegionToolkit.Lib.Utils;
 
 namespace LenovoLegionToolkit.Lib.PackageDownloader.Detectors;
 
+internal readonly record struct PackageDetectionResult(
+    bool IsUpdate,
+    RebootType Reboot,
+    string? InstalledVersion,
+    DateTime? InstalledDate,
+    string? MatchedAvailableVersion,
+    bool IsInstalledNewer);
+
 internal partial class PCSupportPackageUpdateDetector
 {
     [GeneratedRegex(@"^([A-Z0-9]{4})(\d{2})WW$", RegexOptions.IgnoreCase)]
@@ -43,10 +51,10 @@ internal partial class PCSupportPackageUpdateDetector
         title.Contains("Service Tool", StringComparison.OrdinalIgnoreCase) ||
         title.Contains("Right to Repair", StringComparison.OrdinalIgnoreCase);
 
-    public (bool IsUpdate, RebootType Reboot, string? InstalledVersion) Detect(string category, string title, string versionString, DateTime releaseDate)
+    public PackageDetectionResult Detect(string category, string title, string versionString, DateTime releaseDate)
     {
         if (string.IsNullOrWhiteSpace(versionString))
-            return (false, RebootType.NotRequired, null);
+            return new(false, RebootType.NotRequired, null, null, null, false);
 
         // 1. BIOS update check (e.g. RYCN30WW vs installed RYCN29WW)
         var biosMatch = BiosVersionRegex().Match(versionString.Trim());
@@ -61,15 +69,18 @@ internal partial class PCSupportPackageUpdateDetector
             {
                 var pkgBios = new BiosVersion(prefix, pkgBiosNum);
                 if (_currentBios.Value.IsLowerThan(pkgBios))
-                    return (true, RebootType.Forced, installedBiosLabel);
+                    return new(true, RebootType.Forced, installedBiosLabel, null, versionString.Trim(), false);
+
+                var isNewer = _currentBios.Value.Version.HasValue && _currentBios.Value.Version.Value > pkgBiosNum;
+                return new(false, RebootType.Forced, installedBiosLabel, null, versionString.Trim(), isNewer);
             }
 
-            return (false, RebootType.Forced, installedBiosLabel);
+            return new(false, RebootType.Forced, installedBiosLabel, null, versionString.Trim(), false);
         }
 
         // Skip pure diagnostic tools / apps / manuals
         if (IsUtilityCategory(category, title))
-            return (false, RebootType.NotRequired, null);
+            return new(false, RebootType.NotRequired, null, null, null, false);
 
         // 2. Driver version comparison against installed PnP drivers
         var extractedVersions = DottedVersionRegex().Matches(versionString)
@@ -79,13 +90,14 @@ internal partial class PCSupportPackageUpdateDetector
             .ToArray();
 
         if (extractedVersions.Length == 0 || _driverInfoCache.Count == 0)
-            return (false, RebootType.NotRequired, null);
+            return new(false, RebootType.NotRequired, null, null, null, false);
 
         var candidateDrivers = FilterDriversForPackage(category, title);
         if (candidateDrivers.Count == 0)
-            return (false, RebootType.NotRequired, null);
+            return new(false, RebootType.NotRequired, null, null, null, false);
 
-        Version? bestMatchedInstalled = null;
+        DriverInfo? bestMatchedDriver = null;
+        Version? bestMatchedPkgVer = null;
 
         foreach (var pkgVer in extractedVersions)
         {
@@ -93,14 +105,18 @@ internal partial class PCSupportPackageUpdateDetector
             // only compare against the hardware chip family actually present on this machine.
             var matchingInstalled = candidateDrivers
                 .Where(d => d.Version is not null && d.Version.Major == pkgVer.Major && d.Version.Minor == pkgVer.Minor)
+                .OrderByDescending(d => d.Version)
                 .ToArray();
 
             if (matchingInstalled.Length == 0)
                 continue;
 
-            var highestInstalled = matchingInstalled.Max(d => d.Version)!;
-            if (bestMatchedInstalled is null || highestInstalled > bestMatchedInstalled)
-                bestMatchedInstalled = highestInstalled;
+            var highestInstalled = matchingInstalled[0];
+            if (bestMatchedDriver is null || highestInstalled.Version! > bestMatchedDriver.Value.Version!)
+            {
+                bestMatchedDriver = highestInstalled;
+                bestMatchedPkgVer = pkgVer;
+            }
 
             var anyOutdated = matchingInstalled.Any(d =>
                 d.Version! < pkgVer &&
@@ -109,17 +125,31 @@ internal partial class PCSupportPackageUpdateDetector
             var anyAlreadyNewerOrEqual = matchingInstalled.Any(d => d.Version! >= pkgVer);
 
             if (anyOutdated && !anyAlreadyNewerOrEqual)
-                return (true, RebootType.Requested, highestInstalled.ToString());
+                return new(true, RebootType.Requested, highestInstalled.Version!.ToString(), highestInstalled.Date, pkgVer.ToString(), false);
         }
 
-        // Fall back to highest installed version among matched candidates for display even when branches differ
-        bestMatchedInstalled ??= candidateDrivers
+        if (bestMatchedDriver is { Version: not null } matched && bestMatchedPkgVer is not null)
+        {
+            var isNewer = matched.Version > bestMatchedPkgVer;
+            return new(false, RebootType.NotRequired, matched.Version.ToString(), matched.Date, bestMatchedPkgVer.ToString(), isNewer);
+        }
+
+        // Fall back to highest installed version among matched candidates even when Major.Minor branches differ
+        var fallback = candidateDrivers
             .Where(d => d.Version is not null)
-            .Select(d => d.Version!)
-            .OrderByDescending(v => v)
+            .OrderByDescending(d => d.Version)
             .FirstOrDefault();
 
-        return (false, RebootType.NotRequired, bestMatchedInstalled?.ToString());
+        if (fallback.Version is not null)
+        {
+            var closestPkgVer = extractedVersions
+                .OrderBy(v => Math.Abs(v.Major - fallback.Version.Major))
+                .First();
+            var isNewer = fallback.Version > closestPkgVer;
+            return new(false, RebootType.NotRequired, fallback.Version.ToString(), fallback.Date, closestPkgVer.ToString(), isNewer);
+        }
+
+        return new(false, RebootType.NotRequired, null, null, null, false);
     }
 
     private List<DriverInfo> FilterDriversForPackage(string category, string title)
@@ -150,6 +180,9 @@ internal partial class PCSupportPackageUpdateDetector
 
         if (combined.Contains("Serial IO", StringComparison.OrdinalIgnoreCase) || combined.Contains("AMD DRTM", StringComparison.OrdinalIgnoreCase) || combined.Contains("Chipset", StringComparison.OrdinalIgnoreCase))
             return _driverInfoCache.Where(d => ContainsId(d, "ACPI\\AMDI", "VEN_1022")).ToList();
+
+        if (combined.Contains("IGRS", StringComparison.OrdinalIgnoreCase) || combined.Contains("RFI Suppression", StringComparison.OrdinalIgnoreCase))
+            return _driverInfoCache.Where(d => ContainsId(d, "RFI", "LENOVO_RFI", "AMDRFI")).ToList();
 
         if (combined.Contains("Energy Management", StringComparison.OrdinalIgnoreCase))
             return _driverInfoCache.Where(d => ContainsId(d, "VPC2004")).ToList();

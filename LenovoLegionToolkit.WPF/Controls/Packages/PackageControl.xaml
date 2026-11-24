@@ -92,7 +92,7 @@
                     TextTrimming="CharacterEllipsis" />
 
                 <!-- Row 2: DriversCloud-style Version Comparison -->
-                <StackPanel
+                <WrapPanel
                     x:Name="_versionComparisonPanel"
                     Grid.Row="2"
                     Grid.Column="0"
@@ -101,6 +101,7 @@
 
                     <TextBlock
                         x:Name="_installedVersionLabel"
+                        VerticalAlignment="Center"
                         FontSize="13"
                         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                         Visibility="Collapsed" />
@@ -108,6 +109,7 @@
                     <TextBlock
                         x:Name="_versionArrowText"
                         Margin="6,0,6,0"
+                        VerticalAlignment="Center"
                         FontSize="13"
                         Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                         Text="→"
@@ -115,10 +117,26 @@
 
                     <TextBlock
                         x:Name="_availableVersionLabel"
+                        VerticalAlignment="Center"
                         FontSize="13"
-                        FontWeight="Medium"
+                        FontWeight="SemiBold"
                         MouseRightButtonUp="CopyToClipboard_MouseRightButtonUp" />
-                </StackPanel>
+
+                    <Border
+                        x:Name="_upgradeSizeBadge"
+                        Margin="8,0,0,0"
+                        Padding="6,1"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                        CornerRadius="4"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="_upgradeSizeTextBlock"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    </Border>
+                </WrapPanel>
 
                 <!-- Row 3: Description (optional) -->
                 <TextBlock

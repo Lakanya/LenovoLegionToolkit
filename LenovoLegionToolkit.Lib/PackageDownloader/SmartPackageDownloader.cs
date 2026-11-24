@@ -118,6 +118,9 @@ public partial class SmartPackageDownloader(
                     Reboot = pcPkg.Reboot != RebootType.NotRequired ? pcPkg.Reboot : vPkg.Reboot,
                     InstallCommand = vPkg.InstallCommand,
                     InstalledVersion = pcPkg.InstalledVersion ?? vPkg.InstalledVersion,
+                    InstalledDate = pcPkg.InstalledDate ?? vPkg.InstalledDate,
+                    MatchedAvailableVersion = pcPkg.MatchedAvailableVersion ?? vPkg.MatchedAvailableVersion,
+                    IsInstalledNewer = pcPkg.IsInstalledNewer,
                     SourceName = pcPkg.SourceName ?? "Lenovo PC Support",
                     IsUtilityOrTool = pcPkg.IsUtilityOrTool
                 });

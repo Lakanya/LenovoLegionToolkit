@@ -678,6 +678,9 @@ public struct Package
     public string? InstallCommand { get; init; }
     public bool IsNvidiaUpstream { get; init; }
     public string? InstalledVersion { get; init; }
+    public DateTime? InstalledDate { get; init; }
+    public string? MatchedAvailableVersion { get; init; }
+    public bool IsInstalledNewer { get; init; }
     public string? SourceName { get; init; }
     public bool IsUtilityOrTool { get; init; }
 

@@ -23,7 +23,7 @@ public class NvidiaDriverPackageProvider(HttpClientFactory httpClientFactory)
         if (installed is null)
             return null;
 
-        var (gpuName, installedVersionText, installedVersion) = installed.Value;
+        var (gpuName, installedVersionText, installedVersion, installedDate) = installed.Value;
         var osId = os == OS.Windows10 ? 57 : 135;
 
         var url = $"https://gfwsl.geforce.com/services_toolkit/services/com/nvidia/services/AjaxDriverService.php" +
@@ -60,6 +60,7 @@ public class NvidiaDriverPackageProvider(HttpClientFactory httpClientFactory)
 
         var latestVersion = ParseSimpleVersion(latestVersionText);
         var isUpdate = installedVersion is not null && latestVersion is not null && latestVersion > installedVersion;
+        var isInstalledNewer = installedVersion is not null && latestVersion is not null && installedVersion > latestVersion;
 
         var description = isUpdate
             ? "Newer official Game Ready WHQL release available. Open NVCleanstall for a clean, debloated install."
@@ -83,16 +84,19 @@ public class NvidiaDriverPackageProvider(HttpClientFactory httpClientFactory)
             Reboot = RebootType.NotRequired,
             IsNvidiaUpstream = true,
             InstalledVersion = installedVersionText,
+            InstalledDate = installedDate,
+            MatchedAvailableVersion = latestVersionText,
+            IsInstalledNewer = isInstalledNewer,
             SourceName = "NVIDIA Official (NVCleanstall)",
             IsUtilityOrTool = false
         };
     }
 
-    private static (string GpuName, string? VersionText, Version? Version)? GetInstalledNvidiaGpuInfo()
+    private static (string GpuName, string? VersionText, Version? Version, DateTime? DriverDate)? GetInstalledNvidiaGpuInfo()
     {
         try
         {
-            using var searcher = new ManagementObjectSearcher("SELECT Name, DriverVersion, PNPDeviceID FROM Win32_VideoController");
+            using var searcher = new ManagementObjectSearcher("SELECT Name, DriverVersion, DriverDate, PNPDeviceID FROM Win32_VideoController");
             foreach (var obj in searcher.Get().OfType<ManagementObject>())
             {
                 var pnpId = obj["PNPDeviceID"]?.ToString() ?? string.Empty;
@@ -105,7 +109,15 @@ public class NvidiaDriverPackageProvider(HttpClientFactory httpClientFactory)
 
                 var rawDriverVersion = obj["DriverVersion"]?.ToString()?.Trim();
                 var friendly = ConvertWindowsDriverVersionToNvidia(rawDriverVersion);
-                return (name, friendly, ParseSimpleVersion(friendly));
+
+                DateTime? driverDate = null;
+                if (obj["DriverDate"] is string dmtf && !string.IsNullOrWhiteSpace(dmtf))
+                {
+                    try { driverDate = ManagementDateTimeConverter.ToDateTime(dmtf); }
+                    catch { /* ignore */ }
+                }
+
+                return (name, friendly, ParseSimpleVersion(friendly), driverDate);
             }
         }
         catch (Exception ex)

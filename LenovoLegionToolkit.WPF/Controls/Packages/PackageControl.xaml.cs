@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -47,18 +48,37 @@ public partial class PackageControl : IProgress<float>
         _categorySourceTextBlock.Text = $"{package.Category}  ·  {sourceLabel}";
 
         // DriversCloud-style Installed -> Available version comparison
+        var availableDisplay = !string.IsNullOrWhiteSpace(package.MatchedAvailableVersion)
+            ? package.MatchedAvailableVersion
+            : package.Version;
+        var availDateSuffix = $" ({package.ReleaseDate:MMM yyyy})";
+
         if (!string.IsNullOrWhiteSpace(package.InstalledVersion))
         {
-            _installedVersionLabel.Text = $"Installed: {package.InstalledVersion}";
+            var instDateSuffix = package.InstalledDate.HasValue ? $" ({package.InstalledDate.Value:MMM yyyy})" : string.Empty;
+            _installedVersionLabel.Text = $"Current: {package.InstalledVersion}{instDateSuffix}";
             _installedVersionLabel.Visibility = Visibility.Visible;
             _versionArrowText.Visibility = Visibility.Visible;
-            _availableVersionLabel.Text = $"Available: {package.Version}";
+            _availableVersionLabel.Text = $"New: {availableDisplay}{availDateSuffix}";
+
             if (package.IsUpdate)
                 _availableVersionLabel.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorSuccessBrush");
+
+            var upgradeBadge = GetUpgradeMagnitudeLabel(package.InstalledVersion, availableDisplay, package.IsUpdate, package.IsInstalledNewer, package.IsBiosUpdate);
+            if (!string.IsNullOrWhiteSpace(upgradeBadge))
+            {
+                _upgradeSizeTextBlock.Text = upgradeBadge;
+                _upgradeSizeBadge.Visibility = Visibility.Visible;
+                if (package.IsUpdate)
+                {
+                    _upgradeSizeBadge.SetResourceReference(Border.BackgroundProperty, "SystemFillColorSuccessBackgroundBrush");
+                    _upgradeSizeTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorSuccessBrush");
+                }
+            }
         }
         else
         {
-            _availableVersionLabel.Text = $"Version: {package.Version}";
+            _availableVersionLabel.Text = $"Version: {availableDisplay}{availDateSuffix}";
         }
 
         _descriptionTextBlock.Text = package.Description;
@@ -84,7 +104,7 @@ public partial class PackageControl : IProgress<float>
         {
             _statusBadge.Visibility = Visibility.Visible;
             _statusIcon.Symbol = SymbolRegular.CheckmarkCircle24;
-            _statusTextBlock.Text = "Up to Date";
+            _statusTextBlock.Text = package.IsInstalledNewer ? "Newer Installed" : "Up to Date";
             _statusBadge.SetResourceReference(Border.BackgroundProperty, "ControlFillColorSecondaryBrush");
             _statusIcon.SetResourceReference(Control.ForegroundProperty, "TextFillColorSecondaryBrush");
             _statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
@@ -324,4 +344,38 @@ public partial class PackageControl : IProgress<float>
     }
 
     private void CancelDownloadButton_Click(object sender, RoutedEventArgs e) => _downloadPackageTokenSource?.Cancel();
+
+    private static string? GetUpgradeMagnitudeLabel(string installed, string available, bool isUpdate, bool isInstalledNewer, bool isBios)
+    {
+        if (isInstalledNewer)
+            return "Newer on PC";
+
+        if (!isUpdate)
+            return null;
+
+        if (isBios)
+        {
+            var instDigits = new string(installed.Where(char.IsDigit).ToArray());
+            var availDigits = new string(available.Where(char.IsDigit).ToArray());
+            if (int.TryParse(instDigits, out var iNum) && int.TryParse(availDigits, out var aNum) && aNum > iNum)
+            {
+                var diff = aNum - iNum;
+                return diff == 1 ? "BIOS +1 rev" : $"BIOS +{diff} revs";
+            }
+            return "BIOS Update";
+        }
+
+        if (Version.TryParse(installed, out var iVer) && Version.TryParse(available, out var aVer) && aVer > iVer)
+        {
+            if (aVer.Major > iVer.Major)
+                return $"Major (+{aVer.Major - iVer.Major})";
+            if (aVer.Minor > iVer.Minor)
+                return $"Minor (+{aVer.Minor - iVer.Minor})";
+            if (aVer.Build > iVer.Build)
+                return "Build Update";
+            return "Patch";
+        }
+
+        return "Update";
+    }
 }
