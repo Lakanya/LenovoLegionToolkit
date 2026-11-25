@@ -79,6 +79,19 @@
                 Visibility="Collapsed">
                 <controls:CardHeaderControl Title="{x:Static resources:Resource.SettingsPage_WindowsPowerPlansControlPanel_Title}" />
             </custom:CardAction>
+            <custom:CardControl Margin="0,0,0,8" Icon="TopSpeed24">
+                <custom:CardControl.Header>
+                    <controls:CardHeaderControl
+                        Title="Auto CPU EPP Boost (AC)"
+                        Subtitle="Automatically sets Windows AC PERFEPP &amp; PERFEPP1 to 0% in Performance/Extreme/Custom (full Zen 5 + Zen 5c boost), 20% in Balance, and 60% in Quiet. Battery (DC) is untouched." />
+                </custom:CardControl.Header>
+                <wpfui:ToggleSwitch
+                    x:Name="_autoCpuEppBoostToggle"
+                    Margin="0,0,0,8"
+                    AutomationProperties.Name="Auto CPU EPP Boost (AC)"
+                    Click="AutoCpuEppBoostToggle_Click"
+                    Visibility="Hidden" />
+            </custom:CardControl>
             <custom:CardControl Margin="0,0,0,8" Icon="Battery024">
                 <custom:CardControl.Header>
                     <controls:CardHeaderControl Title="{x:Static resources:Resource.SettingsPage_OnBatterySinceReset_Title}" Subtitle="{x:Static resources:Resource.SettingsPage_OnBatterySinceReset_Message}" />

@@ -8,6 +8,7 @@ using LenovoLegionToolkit.Lib.Extensions;
 using LenovoLegionToolkit.Lib.Messaging;
 using LenovoLegionToolkit.Lib.Messaging.Messages;
 using LenovoLegionToolkit.Lib.Overclocking.Amd;
+using LenovoLegionToolkit.Lib.Services;
 using LenovoLegionToolkit.Lib.System.Management;
 using LenovoLegionToolkit.Lib.Utils;
 
@@ -120,6 +121,7 @@ public class PowerModeListener(
 
         await windowsPowerModeController.SetPowerModeAsync(value, skipThrottle: true).ConfigureAwait(false);
         await windowsPowerPlanController.SetPowerPlanAsync(value, skipThrottle: true).ConfigureAwait(false);
+        IoCContainer.Resolve<CpuEppBoostService>().ApplyForPowerMode(value);
 
         var gpuOverclockController = IoCContainer.Resolve<GPUOverclockController>();
         Log.Instance.Trace($"Checking GPUOverclock IsSupportedAsync...");

@@ -171,6 +171,7 @@ public class IoCModule : Module
         builder.Register<BatteryDischargeRateMonitorService>();
         builder.Register<DgpuAwakeManager>().SingleInstance();
         builder.Register<ShellFreezeGuardService>().SingleInstance();
+        builder.Register<CpuEppBoostService>().SingleInstance();
 
         builder.Register<AmdOverclockingController>();
 

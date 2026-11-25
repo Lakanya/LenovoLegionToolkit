@@ -8,6 +8,7 @@ using LenovoLegionToolkit.Lib;
 using LenovoLegionToolkit.Lib.Controllers;
 using LenovoLegionToolkit.Lib.Extensions;
 using LenovoLegionToolkit.Lib.Features;
+using LenovoLegionToolkit.Lib.Services;
 using LenovoLegionToolkit.Lib.Settings;
 using LenovoLegionToolkit.Lib.System.Management;
 using LenovoLegionToolkit.Lib.Utils;
@@ -23,6 +24,7 @@ public partial class SettingsPowerControl
     private readonly ITSModeSettings _itsModeSettings = IoCContainer.Resolve<ITSModeSettings>();
     private readonly PowerModeFeature _powerModeFeature = IoCContainer.Resolve<PowerModeFeature>();
     private readonly ITSModeFeature _itsModeFeature = IoCContainer.Resolve<ITSModeFeature>();
+    private readonly CpuEppBoostService _cpuEppBoostService = IoCContainer.Resolve<CpuEppBoostService>();
 
     private bool _isRefreshing;
 
@@ -77,6 +79,9 @@ public partial class SettingsPowerControl
             _powerModeMappingCardHeader.Warning = Resource.SettingsPage_PowerModeMapping_ITSWarning;
         else
             _powerModeMappingCardHeader.Warning = string.Empty;
+
+        _autoCpuEppBoostToggle.IsChecked = _settings.Store.AutoCpuEppBoostEnabled;
+        _autoCpuEppBoostToggle.Visibility = Visibility.Visible;
 
         _onBatterySinceResetToggle.IsChecked = _settings.Store.ResetBatteryOnSinceTimerOnReboot;
         _onBatterySinceResetToggle.Visibility = Visibility.Visible;
@@ -200,6 +205,25 @@ public partial class SettingsPowerControl
     private void WindowsPowerPlansControlPanel_Click(object sender, RoutedEventArgs e)
     {
         Process.Start("control", "/name Microsoft.PowerOptions");
+    }
+
+    private async void AutoCpuEppBoostToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isRefreshing)
+            return;
+
+        var state = _autoCpuEppBoostToggle.IsChecked;
+        if (state is null)
+            return;
+
+        _settings.Store.AutoCpuEppBoostEnabled = state.Value;
+        _settings.SynchronizeStore();
+
+        if (state.Value && await _powerModeFeature.IsSupportedAsync())
+        {
+            var currentMode = await _powerModeFeature.GetStateAsync();
+            _cpuEppBoostService.ApplyForPowerMode(currentMode);
+        }
     }
 
     private void OnBatterySinceResetToggle_Click(object sender, RoutedEventArgs e)

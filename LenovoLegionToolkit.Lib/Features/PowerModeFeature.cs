@@ -1,6 +1,7 @@
 using LenovoLegionToolkit.Lib.Controllers;
 using LenovoLegionToolkit.Lib.Controllers.GodMode;
 using LenovoLegionToolkit.Lib.Listeners;
+using LenovoLegionToolkit.Lib.Services;
 using LenovoLegionToolkit.Lib.System;
 using LenovoLegionToolkit.Lib.System.Management;
 using LenovoLegionToolkit.Lib.Utils;
@@ -136,6 +137,7 @@ public class PowerModeFeature(
         var state = await GetStateAsync().ConfigureAwait(false);
         await windowsPowerModeController.SetPowerModeAsync(state, preset, skipThrottle).ConfigureAwait(false);
         await windowsPowerPlanController.SetPowerPlanAsync(state, true, preset, skipThrottle, vantageStatus).ConfigureAwait(false);
+        IoCContainer.Resolve<CpuEppBoostService>().ApplyForPowerMode(state);
     }
 
     public async Task EnsureGodModeStateIsAppliedAsync(bool skipThrottle = false)

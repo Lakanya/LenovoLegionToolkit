@@ -59,6 +59,7 @@ public class ApplicationSettings : AbstractSettings<ApplicationSettingsStore>
         public PStatePinMode PStatePinMode { get; set; } = PStatePinMode.Max;
         public bool SupportIndicatorDismissed { get; set; }
         public bool ShellFreezeGuardEnabled { get; set; } = true;
+        public bool AutoCpuEppBoostEnabled { get; set; } = true;
 
     }
     public class GameDetectionSettings
